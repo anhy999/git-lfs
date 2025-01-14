@@ -14,41 +14,36 @@ for an overview of features.
 
 ## Getting Started
 
-### Downloading
-
-You can install the Git LFS client in several different ways, depending on your
-setup and preferences.
-
-* **Linux users**. Debian and RPM packages are available from
-  [PackageCloud](https://packagecloud.io/github/git-lfs/install).
-* **macOS users**. [Homebrew](https://brew.sh) bottles are distributed, and can
-  be installed via `brew install git-lfs`.
-* **Windows users**. Git LFS is included in the distribution of
-  [Git for Windows](https://gitforwindows.org/). Alternatively, you can
-  install a recent version of Git LFS from the [Chocolatey](https://chocolatey.org/) package manager.
-* **Binary packages**. In addition, [binary packages](https://github.com/git-lfs/git-lfs/releases) are
-available for Linux, macOS, Windows, and FreeBSD.
-* **Building from source**. [This repository](https://github.com/git-lfs/git-lfs.git) can also be
-built from source using the latest version of [Go](https://golang.org), and the
-available instructions in our
-[Wiki](https://github.com/git-lfs/git-lfs/wiki/Installation#source).
-
-Note that Debian and RPM packages are built for all OSes for amd64 and i386.
-For arm64, only Debian packages for the latest Debian release are built due to the cost of building in emulation.
-
 ### Installing
+
+#### On Linux
+
+Debian and RPM packages are available from packagecloud, see the [Linux installation instructions](INSTALLING.md).
+
+#### On macOS
+
+[Homebrew](https://brew.sh) bottles are distributed and can be installed via `brew install git-lfs`.
+
+#### On Windows
+
+Git LFS is included in the distribution of [Git for Windows](https://gitforwindows.org/).
+Alternatively, you can install a recent version of Git LFS from the [Chocolatey](https://chocolatey.org/) package manager.
 
 #### From binary
 
-The [binary packages](https://github.com/git-lfs/git-lfs/releases) include a script which will:
+[Binary packages](https://github.com/git-lfs/git-lfs/releases) are
+available for Linux, macOS, Windows, and FreeBSD.
+The binary packages include a script which will:
 
-- Install Git LFS binaries onto the system `$PATH`
-- Run `git lfs install` to
-perform required global configuration changes.
+- Install Git LFS binaries onto the system `$PATH`.  On Windows in particular, you may need to restart your command shell so any change to `$PATH` will take effect and Git can locate the Git LFS binary.
+- Run `git lfs install` to perform required global configuration changes.
 
 ```ShellSession
 $ ./install.sh
 ```
+
+Note that Debian and RPM packages are built for multiple Linux distributions and versions for both amd64 and i386.
+For arm64, only Debian packages are built and only for recent versions due to the cost of building in emulation.
 
 #### From source
 
@@ -57,11 +52,7 @@ $ ./install.sh
 - Run `make`.
 - Place the `git-lfs` binary, which can be found in `bin`, on your system’s executable `$PATH` or equivalent.
 - Git LFS requires global configuration changes once per-machine. This can be done by
-running:
-
-```ShellSession
-$ git lfs install
-```
+running: `git lfs install`
 
 #### Verifying releases
 
@@ -130,7 +121,7 @@ $ git commit -m "add psd"
 > **Note that this will rewrite history and change all of the Git object IDs in your
 > repository, just like the export version of this command.**
 >
-> For more information, read [`git-lfs-migrate(1)`](https://github.com/git-lfs/git-lfs/blob/main/docs/man/git-lfs-migrate.1.ronn).
+> For more information, read [`git-lfs-migrate(1)`](https://github.com/git-lfs/git-lfs/blob/main/docs/man/git-lfs-migrate.adoc).
 
 You can confirm that Git LFS is managing your PSD file:
 
@@ -148,8 +139,6 @@ Uploading LFS objects: 100% (1/1), 810 B, 1.2 KB/s
 To https://github.com/git-lfs/git-lfs-test
    67fcf6a..47b2002  main -> main
 ```
-
-Note: Git LFS requires at least Git 1.8.2 on Linux or 1.8.5 on macOS.
 
 ### Uninstalling
 
@@ -172,6 +161,10 @@ know in an issue, and we'll definitely try to help or get it fixed.
 Git LFS maintains a list of currently known limitations, which you can find and
 edit [here](https://github.com/git-lfs/git-lfs/wiki/Limitations).
 
+Current releases of Git LFS will work with Git versions as early as
+Git 2.0.0.  However, for best performance, using a recent version of Git
+is highly recommended.
+
 Git LFS source code utilizes Go modules in its build system, and therefore this
 project contains a `go.mod` file with a defined Go module path.  However, we
 do not maintain a stable Go language API or ABI, as Git LFS is intended to be
@@ -187,8 +180,8 @@ $ git lfs help <subcommand>
 ```
 
 The [official documentation](docs) has command references and specifications for
-the tool.  There's also a [FAQ](https://github.com/git-lfs/git-lfs/wiki/FAQ) on
-the wiki which answers some common questions.
+the tool.  There's also a [FAQ](https://github.com/git-lfs/git-lfs/blob/main/docs/man/git-lfs-faq.adoc)
+shipped with Git LFS which answers some common questions.
 
 If you have a question on how to use Git LFS, aren't sure about something, or
 are looking for input from others on tips about best practices or use cases,
@@ -218,18 +211,15 @@ These are the humans that form the Git LFS core team, which runs the project.
 
 In alphabetical order:
 
-| [@bk2204][bk2204-user] | [@chrisd8088][chrisd8088-user] | [@larsxschneider][larsxschneider-user] |
-| :---: | :---: | :---: |
-| [![][bk2204-img]][bk2204-user] | [![][chrisd8088-img]][chrisd8088-user] | [![][larsxschneider-img]][larsxschneider-user] |
-| [PGP 0223B187][bk2204-pgp] | [PGP 088335A9][chrisd8088-pgp] | [PGP A5795889][larsxschneider-pgp] |
+| [@chrisd8088][chrisd8088-user] | [@larsxschneider][larsxschneider-user] |
+| :---: | :---: |
+| [![][chrisd8088-img]][chrisd8088-user] | [![][larsxschneider-img]][larsxschneider-user] |
+| [PGP 088335A9][chrisd8088-pgp] | [PGP A5795889][larsxschneider-pgp] |
 
-[bk2204-img]: https://avatars1.githubusercontent.com/u/497054?s=100&v=4
 [chrisd8088-img]: https://avatars1.githubusercontent.com/u/28857117?s=100&v=4
 [larsxschneider-img]: https://avatars1.githubusercontent.com/u/477434?s=100&v=4
-[bk2204-user]: https://github.com/bk2204
 [chrisd8088-user]: https://github.com/chrisd8088
 [larsxschneider-user]: https://github.com/larsxschneider
-[bk2204-pgp]: https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x88ace9b29196305ba9947552f1ba225c0223b187
 [chrisd8088-pgp]: https://keyserver.ubuntu.com/pks/lookup?op=get&search=0x86cd3297749375bcf8206715f54fe648088335a9
 [larsxschneider-pgp]: https://keyserver.ubuntu.com/pks/lookup?op=get&search=0xaa3b3450295830d2de6db90caba67be5a5795889
 
@@ -241,17 +231,19 @@ not be possible without them.
 
 In alphabetical order:
 
-| [@andyneff][andyneff-user] | [@PastelMobileSuit][PastelMobileSuit-user] | [@rubyist][rubyist-user] | [@sinbad][sinbad-user] | [@technoweenie][technoweenie-user] | [@ttaylorr][ttaylorr-user] |
-| :---: | :---: | :---: | :---: | :---: | :---: |
-| [![][andyneff-img]][andyneff-user] | [![][PastelMobileSuit-img]][PastelMobileSuit-user] | [![][rubyist-img]][rubyist-user] | [![][sinbad-img]][sinbad-user] | [![][technoweenie-img]][technoweenie-user] | [![][ttaylorr-img]][ttaylorr-user] |
+| [@andyneff][andyneff-user] | [@bk2204][bk2204-user] | [@PastelMobileSuit][PastelMobileSuit-user] | [@rubyist][rubyist-user] | [@sinbad][sinbad-user] | [@technoweenie][technoweenie-user] | [@ttaylorr][ttaylorr-user] |
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| [![][andyneff-img]][andyneff-user] | [![][bk2204-img]][bk2204-user] | [![][PastelMobileSuit-img]][PastelMobileSuit-user] | [![][rubyist-img]][rubyist-user] | [![][sinbad-img]][sinbad-user] | [![][technoweenie-img]][technoweenie-user] | [![][ttaylorr-img]][ttaylorr-user] |
 
 [andyneff-img]: https://avatars1.githubusercontent.com/u/7596961?v=3&s=100
+[bk2204-img]: https://avatars1.githubusercontent.com/u/497054?s=100&v=4
 [PastelMobileSuit-img]: https://avatars2.githubusercontent.com/u/37254014?s=100&v=4
 [rubyist-img]: https://avatars1.githubusercontent.com/u/143?v=3&s=100
 [sinbad-img]: https://avatars1.githubusercontent.com/u/142735?v=3&s=100
 [technoweenie-img]: https://avatars3.githubusercontent.com/u/21?v=3&s=100
 [ttaylorr-img]: https://avatars2.githubusercontent.com/u/443245?s=100&v=4
 [andyneff-user]: https://github.com/andyneff
+[bk2204-user]: https://github.com/bk2204
 [PastelMobileSuit-user]: https://github.com/PastelMobileSuit
 [sinbad-user]: https://github.com/sinbad
 [rubyist-user]: https://github.com/rubyist

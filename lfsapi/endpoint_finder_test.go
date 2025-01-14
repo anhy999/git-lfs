@@ -1,8 +1,8 @@
 package lfsapi
 
 import (
-	"io/ioutil"
 	"os"
+	"regexp"
 	"runtime"
 	"testing"
 
@@ -323,10 +323,8 @@ func TestLocalPathEndpointAddsDotGitForWorkingRepo(t *testing.T) {
 		return
 	}
 
-	path, err := ioutil.TempDir("", "lfsRepo")
-	assert.Nil(t, err)
-	path = path + "/local/path"
-	err = os.MkdirAll(path+"/.git", 0755)
+	path := t.TempDir() + "/local/path"
+	err := os.MkdirAll(path+"/.git", 0755)
 	assert.Nil(t, err)
 
 	finder := NewEndpointFinder(lfshttp.NewContext(nil, nil, map[string]string{
@@ -345,10 +343,8 @@ func TestLocalPathEndpointPreservesDotGitForWorkingRepo(t *testing.T) {
 		return
 	}
 
-	path, err := ioutil.TempDir("", "lfsRepo")
-	assert.Nil(t, err)
-	path = path + "/local/path/.git"
-	err = os.MkdirAll(path, 0755)
+	path := t.TempDir() + "/local/path/.git"
+	err := os.MkdirAll(path, 0755)
 	assert.Nil(t, err)
 
 	finder := NewEndpointFinder(lfshttp.NewContext(nil, nil, map[string]string{
@@ -367,10 +363,8 @@ func TestLocalPathEndpointPreservesNoDotGitForBareRepo(t *testing.T) {
 		return
 	}
 
-	path, err := ioutil.TempDir("", "lfsRepo")
-	assert.Nil(t, err)
-	path = path + "/local/path"
-	err = os.MkdirAll(path, 0755)
+	path := t.TempDir() + "/local/path"
+	err := os.MkdirAll(path, 0755)
 	assert.Nil(t, err)
 
 	finder := NewEndpointFinder(lfshttp.NewContext(nil, nil, map[string]string{
@@ -389,10 +383,8 @@ func TestLocalPathEndpointRemovesDotGitForBareRepo(t *testing.T) {
 		return
 	}
 
-	path, err := ioutil.TempDir("", "lfsRepo")
-	assert.Nil(t, err)
-	path = path + "/local/path"
-	err = os.MkdirAll(path, 0755)
+	path := t.TempDir() + "/local/path"
+	err := os.MkdirAll(path, 0755)
 	assert.Nil(t, err)
 
 	finder := NewEndpointFinder(lfshttp.NewContext(nil, nil, map[string]string{
@@ -563,7 +555,8 @@ func TestEndpointParsing(t *testing.T) {
 					Path:        "git-lfs/git-lfs.git",
 					Port:        "",
 				},
-				Operation: "",
+				Operation:   "",
+				OriginalUrl: "ssh://git@github.com/git-lfs/git-lfs.git",
 			},
 		},
 		"port bare ssh": {
@@ -575,7 +568,8 @@ func TestEndpointParsing(t *testing.T) {
 					Path:        "git-lfs/git-lfs.git",
 					Port:        "443",
 				},
-				Operation: "",
+				Operation:   "",
+				OriginalUrl: "ssh://git@lfshttp.github.com:443/git-lfs/git-lfs.git",
 			},
 		},
 		"no user bare ssh": {
@@ -587,7 +581,8 @@ func TestEndpointParsing(t *testing.T) {
 					Path:        "git-lfs/git-lfs.git",
 					Port:        "",
 				},
-				Operation: "",
+				Operation:   "",
+				OriginalUrl: "ssh://github.com/git-lfs/git-lfs.git",
 			},
 		},
 		"bare word bare ssh": {
@@ -599,7 +594,8 @@ func TestEndpointParsing(t *testing.T) {
 					Path:        "git-lfs/git-lfs.git",
 					Port:        "",
 				},
-				Operation: "",
+				Operation:   "",
+				OriginalUrl: "ssh://github/git-lfs/git-lfs.git",
 			},
 		},
 		"insteadof alias": {
@@ -611,7 +607,8 @@ func TestEndpointParsing(t *testing.T) {
 					Path:        "",
 					Port:        "",
 				},
-				Operation: "",
+				Operation:   "",
+				OriginalUrl: "https://github.com/git-lfs/git-lfs.git",
 			},
 		},
 		"remote helper": {
@@ -662,7 +659,8 @@ func TestInsteadOf(t *testing.T) {
 					Path:        "",
 					Port:        "",
 				},
-				Operation: "download",
+				Operation:   "download",
+				OriginalUrl: "https://example.com/git-lfs/git-lfs.git",
 			},
 		},
 		"pushinsteadof alias (upload)": {
@@ -675,7 +673,8 @@ func TestInsteadOf(t *testing.T) {
 					Path:        "/git-lfs/git-lfs.git",
 					Port:        "",
 				},
-				Operation: "upload",
+				Operation:   "upload",
+				OriginalUrl: "ssh://example.com/git-lfs/git-lfs.git",
 			},
 		},
 		"exp alias (download)": {
@@ -688,7 +687,8 @@ func TestInsteadOf(t *testing.T) {
 					Path:        "/git-lfs/git-lfs.git",
 					Port:        "",
 				},
-				Operation: "download",
+				Operation:   "download",
+				OriginalUrl: "ssh://example.com/git-lfs/git-lfs.git",
 			},
 		},
 		"exp alias (upload)": {
@@ -701,7 +701,8 @@ func TestInsteadOf(t *testing.T) {
 					Path:        "/git-lfs/git-lfs.git",
 					Port:        "",
 				},
-				Operation: "upload",
+				Operation:   "upload",
+				OriginalUrl: "ssh://example.com/git-lfs/git-lfs.git",
 			},
 		},
 	} {
@@ -724,5 +725,56 @@ func TestNewEndpointFromCloneURLWithConfig(t *testing.T) {
 		if e.Url != expected {
 			t.Errorf("%s returned bad endpoint url %s", actual, e.Url)
 		}
+	}
+}
+
+func TestExtractRemoteUrlForHTTPS(t *testing.T) {
+	line := "14d0e09d4643d7547267c1cbf9972ac1c4db0b2d	not-for-merge	branch 'master' of https://example.com/git-lfs/git-lfs"
+	expected := "https://example.com/git-lfs/git-lfs"
+
+	result, err := ExtractRemoteUrl(line)
+	assert.Nil(t, err)
+	assert.Equal(t, expected, result)
+}
+
+func TestExtractRemoteUrlForSSH(t *testing.T) {
+	line := "cb2ad9f68531e6afe76326d46acf566acf8af4f9		branch 'master' of ssh://example.com/git-lfs/git-lfs"
+	expected := "ssh://example.com/git-lfs/git-lfs"
+
+	result, err := ExtractRemoteUrl(line)
+	assert.Nil(t, err)
+	assert.Equal(t, expected, result)
+}
+
+func TestExtractRemoteUrlForGit(t *testing.T) {
+	line := "90ed234fb0708235a733bcae0e5b90bd4fac5321		branch 'master' of example.com:git-lfs/git-lfs"
+	expected := "example.com:git-lfs/git-lfs"
+
+	result, err := ExtractRemoteUrl(line)
+	assert.Nil(t, err)
+	assert.Equal(t, expected, result)
+}
+
+func TestExtractRemoteUrlNoURL(t *testing.T) {
+	invalid := []string{
+		"text without url",
+		// invalid characters in base64 git hash
+		"qwert34fb0708235a733bcae0e5b90bd4fac5321		branch 'master' of example.com:git-lfs/git-lfs",
+		// invalid git hash length
+		"90ed234fb0708235a733bcae0e5b90bd4fac532		branch 'master' of example.com:git-lfs/git-lfs",
+		// other label present where only `not-for-merge` label allowed
+		"90ed234fb0708235a733bcae0e5b90bd4fac532	disallowed-label	branch 'master' of example.com:git-lfs/git-lfs",
+		// other type present where only `tag` or `branch` allowed
+		"90ed234fb0708235a733bcae0e5b90bd4fac532		othertype 'master' of example.com:git-lfs/git-lfs",
+		// missing `of`
+		"90ed234fb0708235a733bcae0e5b90bd4fac5321		branch 'master' example.com:git-lfs/git-lfs",
+		// missing `'`
+		"90ed234fb0708235a733bcae0e5b90bd4fac5321		branch of example.com:git-lfs/git-lfs",
+	}
+	for _, line := range invalid {
+		result, err := ExtractRemoteUrl(line)
+		assert.NotNil(t, err)
+		assert.Regexp(t, regexp.MustCompile("^failed to extract remote URL.*$"), err.Error())
+		assert.Equal(t, "", result)
 	}
 }

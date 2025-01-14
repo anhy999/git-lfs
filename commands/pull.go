@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"strings"
 	"sync"
 
 	"github.com/git-lfs/git-lfs/v3/config"
@@ -18,11 +19,9 @@ import (
 // Handles the process of checking out a single file, and updating the git
 // index.
 func newSingleCheckout(gitEnv config.Environment, remote string) abstractCheckout {
-	manifest := getTransferManifestOperationRemote("download", remote)
-
 	clean, ok := gitEnv.Get("filter.lfs.clean")
 	if !ok || len(clean) == 0 {
-		return &noOpCheckout{manifest: manifest}
+		return &noOpCheckout{remote: remote}
 	}
 
 	// Get a converter from repo-relative to cwd-relative
@@ -35,12 +34,13 @@ func newSingleCheckout(gitEnv config.Environment, remote string) abstractCheckou
 	return &singleCheckout{
 		gitIndexer:    &gitIndexer{},
 		pathConverter: pathConverter,
-		manifest:      manifest,
+		manifest:      nil,
+		remote:        remote,
 	}
 }
 
 type abstractCheckout interface {
-	Manifest() *tq.Manifest
+	Manifest() tq.Manifest
 	Skip() bool
 	Run(*lfs.WrappedPointer)
 	RunToPath(*lfs.WrappedPointer, string) error
@@ -50,10 +50,14 @@ type abstractCheckout interface {
 type singleCheckout struct {
 	gitIndexer    *gitIndexer
 	pathConverter lfs.PathConverter
-	manifest      *tq.Manifest
+	manifest      tq.Manifest
+	remote        string
 }
 
-func (c *singleCheckout) Manifest() *tq.Manifest {
+func (c *singleCheckout) Manifest() tq.Manifest {
+	if c.manifest == nil {
+		c.manifest = getTransferManifestOperationRemote("download", c.remote)
+	}
 	return c.manifest
 }
 
@@ -66,14 +70,27 @@ func (c *singleCheckout) Run(p *lfs.WrappedPointer) {
 
 	// Check the content - either missing or still this pointer (not exist is ok)
 	filepointer, err := lfs.DecodePointerFromFile(cwdfilepath)
-	if err != nil && !os.IsNotExist(err) {
-		if errors.IsNotAPointerError(err) || errors.IsBadPointerKeyError(err) {
-			// File has non-pointer content, leave it alone
+	if err != nil {
+		if os.IsNotExist(err) {
+			output, err := git.DiffIndexWithPaths("HEAD", true, []string{p.Name})
+			if err != nil {
+				LoggedError(err, tr.Tr.Get("Checkout error trying to run diff-index: %s", err))
+				return
+			}
+			if strings.HasPrefix(output, ":100644 000000 ") || strings.HasPrefix(output, ":100755 000000 ") {
+				// This file is deleted in the index.  Don't try
+				// to check it out.
+				return
+			}
+		} else {
+			if errors.IsNotAPointerError(err) || errors.IsBadPointerKeyError(err) {
+				// File has non-pointer content, leave it alone
+				return
+			}
+
+			LoggedError(err, tr.Tr.Get("Checkout error: %s", err))
 			return
 		}
-
-		LoggedError(err, tr.Tr.Get("Checkout error: %s", err))
-		return
 	}
 
 	if filepointer != nil && filepointer.Oid != p.Oid {
@@ -112,10 +129,14 @@ func (c *singleCheckout) Close() {
 }
 
 type noOpCheckout struct {
-	manifest *tq.Manifest
+	manifest tq.Manifest
+	remote   string
 }
 
-func (c *noOpCheckout) Manifest() *tq.Manifest {
+func (c *noOpCheckout) Manifest() tq.Manifest {
+	if c.manifest == nil {
+		c.manifest = getTransferManifestOperationRemote("download", c.remote)
+	}
 	return c.manifest
 }
 

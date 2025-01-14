@@ -142,6 +142,7 @@ type abortableWaitGroup struct {
 	wq      sync.WaitGroup
 	counter int
 	mu      sync.Mutex
+	abort   bool
 }
 
 func newAbortableWaitGroup() *abortableWaitGroup {
@@ -152,22 +153,27 @@ func (q *abortableWaitGroup) Add(delta int) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	q.counter += delta
-	q.wq.Add(delta)
+	if !q.abort {
+		q.counter += delta
+		q.wq.Add(delta)
+	}
 }
 
 func (q *abortableWaitGroup) Done() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
-	q.counter -= 1
-	q.wq.Done()
+	if !q.abort {
+		q.counter -= 1
+		q.wq.Done()
+	}
 }
 
 func (q *abortableWaitGroup) Abort() {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
+	q.abort = true
 	q.wq.Add(-q.counter)
 }
 
@@ -203,7 +209,7 @@ type TransferQueue struct {
 	// once per unique OID on Add(), and is decremented when that transfer
 	// is marked as completed or failed, but not retried.
 	wait     *abortableWaitGroup
-	manifest *Manifest
+	manifest Manifest
 	rc       *retryCounter
 
 	// unsupportedContentType indicates whether the transfer queue ever saw
@@ -292,10 +298,9 @@ func WithBufferDepth(depth int) Option {
 }
 
 // NewTransferQueue builds a TransferQueue, direction and underlying mechanism determined by adapter
-func NewTransferQueue(dir Direction, manifest *Manifest, remote string, options ...Option) *TransferQueue {
+func NewTransferQueue(dir Direction, manifest Manifest, remote string, options ...Option) *TransferQueue {
 	q := &TransferQueue{
 		direction: dir,
-		client:    &tqClient{Client: manifest.APIClient()},
 		remote:    remote,
 		errorc:    make(chan error),
 		transfers: make(map[string]*objects),
@@ -308,10 +313,6 @@ func NewTransferQueue(dir Direction, manifest *Manifest, remote string, options 
 	for _, opt := range options {
 		opt(q)
 	}
-
-	q.rc.MaxRetries = q.manifest.maxRetries
-	q.rc.MaxRetryDelay = q.manifest.maxRetryDelay
-	q.client.SetMaxRetries(q.manifest.maxRetries)
 
 	if q.batchSize <= 0 {
 		q.batchSize = defaultBatchSize
@@ -331,6 +332,18 @@ func NewTransferQueue(dir Direction, manifest *Manifest, remote string, options 
 	return q
 }
 
+// Ensure we have a concrete manifest and that certain delayed variables are set
+// properly.
+func (q *TransferQueue) Upgrade() {
+	if q.client == nil {
+		manifest := q.manifest.Upgrade()
+		q.client = &tqClient{Client: manifest.APIClient()}
+		q.rc.MaxRetries = manifest.maxRetries
+		q.rc.MaxRetryDelay = manifest.maxRetryDelay
+		q.client.SetMaxRetries(manifest.maxRetries)
+	}
+}
+
 // Add adds a *Transfer to the transfer queue. It only increments the amount
 // of waiting the TransferQueue has to do if the *Transfer "t" is new.
 //
@@ -341,6 +354,8 @@ func NewTransferQueue(dir Direction, manifest *Manifest, remote string, options 
 // Only one file will be transferred to/from the Path element of the first
 // transfer.
 func (q *TransferQueue) Add(name, path, oid string, size int64, missing bool, err error) {
+	q.Upgrade()
+
 	if err != nil {
 		q.errorc <- err
 		return
@@ -378,6 +393,8 @@ func (q *TransferQueue) Add(name, path, oid string, size int64, missing bool, er
 //
 // It returns if the value is new or not.
 func (q *TransferQueue) remember(t *objectTuple) objects {
+	q.Upgrade()
+
 	q.trMutex.Lock()
 	defer q.trMutex.Unlock()
 
@@ -398,22 +415,22 @@ func (q *TransferQueue) remember(t *objectTuple) objects {
 // collectBatches collects batches in a loop, prioritizing failed items from the
 // previous before adding new items. The process works as follows:
 //
-//   1. Create a new batch, of size `q.batchSize`, and containing no items
-//   2. While the batch contains less items than `q.batchSize` AND the channel
-//      is open, read one item from the `q.incoming` channel.
-//      a. If the read was a channel close, go to step 4.
-//      b. If the read was a transferable item, go to step 3.
-//   3. Append the item to the batch.
-//   4. Sort the batch by descending object size, make a batch API call, send
-//      the items to the `*adapterBase`.
-//   5. In a separate goroutine, process the worker results, incrementing and
-//      appending retries if possible. On the main goroutine, accept new items
-//      into "pending".
-//   6. Concat() the "next" and "pending" batches such that no more items than
-//      the maximum allowed per batch are in next, and the rest are in pending.
-//   7. If the `q.incoming` channel is open, go to step 2.
-//   8. If the next batch is empty AND the `q.incoming` channel is closed,
-//      terminate immediately.
+//  1. Create a new batch, of size `q.batchSize`, and containing no items
+//  2. While the batch contains less items than `q.batchSize` AND the channel
+//     is open, read one item from the `q.incoming` channel.
+//     a. If the read was a channel close, go to step 4.
+//     b. If the read was a transferable item, go to step 3.
+//  3. Append the item to the batch.
+//  4. Sort the batch by descending object size, make a batch API call, send
+//     the items to the `*adapterBase`.
+//  5. In a separate goroutine, process the worker results, incrementing and
+//     appending retries if possible. On the main goroutine, accept new items
+//     into "pending".
+//  6. Concat() the "next" and "pending" batches such that no more items than
+//     the maximum allowed per batch are in next, and the rest are in pending.
+//  7. If the `q.incoming` channel is open, go to step 2.
+//  8. If the next batch is empty AND the `q.incoming` channel is closed,
+//     terminate immediately.
 //
 // collectBatches runs in its own goroutine.
 func (q *TransferQueue) collectBatches() {
@@ -492,6 +509,8 @@ func (q *TransferQueue) collectBatches() {
 // A "pending" batch is returned, along with whether or not "q.incoming" is
 // closed.
 func (q *TransferQueue) collectPendingUntil(done <-chan struct{}) (pending batch, closing bool) {
+	q.Upgrade()
+
 	for {
 		select {
 		case t, ok := <-q.incoming:
@@ -519,6 +538,8 @@ func (q *TransferQueue) collectPendingUntil(done <-chan struct{}) (pending batch
 // enqueueAndCollectRetriesFor blocks until the entire Batch "batch" has been
 // processed.
 func (q *TransferQueue) enqueueAndCollectRetriesFor(batch batch) (batch, error) {
+	q.Upgrade()
+
 	next := q.makeBatch()
 	tracerx.Printf("tq: sending batch of size %d", len(batch))
 
@@ -542,7 +563,8 @@ func (q *TransferQueue) enqueueAndCollectRetriesFor(batch batch) (batch, error) 
 
 	q.meter.Pause()
 	var bRes *BatchResponse
-	if q.manifest.standaloneTransferAgent != "" {
+	manifest := q.manifest.Upgrade()
+	if manifest.standaloneTransferAgent != "" {
 		// Trust the external transfer agent can do everything by itself.
 		objects := make([]*Transfer, 0, len(batch))
 		for _, t := range batch {
@@ -550,7 +572,7 @@ func (q *TransferQueue) enqueueAndCollectRetriesFor(batch batch) (batch, error) 
 		}
 		bRes = &BatchResponse{
 			Objects:             objects,
-			TransferAdapterName: q.manifest.standaloneTransferAgent,
+			TransferAdapterName: manifest.standaloneTransferAgent,
 		}
 	} else {
 		// Query the Git LFS server for what transfer method to use and
@@ -558,26 +580,25 @@ func (q *TransferQueue) enqueueAndCollectRetriesFor(batch batch) (batch, error) 
 		var err error
 		bRes, err = Batch(q.manifest, q.direction, q.remote, q.ref, batch.ToTransfers())
 		if err != nil {
-			var hasNonScheduledErrors = false
+			var hasNonRetriableObjects = false
 			// If there was an error making the batch API call, mark all of
-			// the objects for retry, and return them along with the error
-			// that was encountered. If any of the objects couldn't be
-			// retried, they will be marked as failed.
+			// the objects for retry if possible.  If any should not be retried,
+			// they will be marked as failed.
 			for _, t := range batch {
 				if q.canRetryObject(t.Oid, err) {
-					hasNonScheduledErrors = true
 					enqueueRetry(t, err, nil)
 				} else if readyTime, canRetry := q.canRetryObjectLater(t.Oid, err); canRetry {
 					enqueueRetry(t, err, &readyTime)
 				} else {
-					hasNonScheduledErrors = true
+					hasNonRetriableObjects = true
 					q.wait.Done()
 				}
 			}
 
 			// Only return error and mark operation as failure if at least one object
 			// was not enqueued for retrial at a later point.
-			if hasNonScheduledErrors {
+			// Make sure to return an error which causes all other objects to be retried.
+			if hasNonRetriableObjects {
 				return next, errors.NewRetriableError(err)
 			} else {
 				return next, nil
@@ -645,7 +666,7 @@ func (q *TransferQueue) enqueueAndCollectRetriesFor(batch batch) (batch, error) 
 					q.Skip(o.Size)
 					q.wait.Done()
 				}
-			} else if a == nil && q.manifest.standaloneTransferAgent == "" {
+			} else if a == nil && manifest.standaloneTransferAgent == "" {
 				q.Skip(o.Size)
 				q.wait.Done()
 			} else {
@@ -674,6 +695,8 @@ func (q *TransferQueue) makeBatch() batch { return make(batch, 0, q.batchSize) }
 //
 // addToAdapter returns immediately, and does not block.
 func (q *TransferQueue) addToAdapter(e lfshttp.Endpoint, pending []*Transfer) <-chan *objectTuple {
+	q.Upgrade()
+
 	retries := make(chan *objectTuple, len(pending))
 
 	if err := q.ensureAdapterBegun(e); err != nil {
@@ -712,6 +735,8 @@ func (q *TransferQueue) addToAdapter(e lfshttp.Endpoint, pending []*Transfer) <-
 }
 
 func (q *TransferQueue) partitionTransfers(transfers []*Transfer) (present []*Transfer, results []TransferResult) {
+	q.Upgrade()
+
 	if q.direction != Upload {
 		return transfers, nil
 	}
@@ -881,6 +906,8 @@ func (q *TransferQueue) Skip(size int64) {
 }
 
 func (q *TransferQueue) ensureAdapterBegun(e lfshttp.Endpoint) error {
+	q.Upgrade()
+
 	q.adapterInitMutex.Lock()
 	defer q.adapterInitMutex.Unlock()
 
@@ -941,8 +968,12 @@ func (q *TransferQueue) Wait() {
 	q.meter.Flush()
 	q.errorwait.Wait()
 
-	if q.manifest.sshTransfer != nil {
-		q.manifest.sshTransfer.Shutdown()
+	if q.manifest.Upgraded() {
+		manifest := q.manifest.Upgrade()
+		if manifest.sshTransfer != nil {
+			manifest.sshTransfer.Shutdown()
+			manifest.sshTransfer = nil
+		}
 	}
 
 	if q.unsupportedContentType {

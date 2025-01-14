@@ -1,11 +1,11 @@
 Name:           git-lfs
-Version:        3.2.0
+Version:        3.6.0
 Release:        1%{?dist}
 Summary:        Git extension for versioning large files
 
 Group:          Applications/Archiving
 License:        MIT
-URL:            https://git-lfs.github.com/
+URL:            https://git-lfs.com/
 Source0:        https://github.com/git-lfs/git-lfs/archive/v%{version}/%{name}-%{version}.tar.gz
 BuildRoot:      %{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 BuildRequires:  perl-Digest-SHA
@@ -33,7 +33,7 @@ ln -s $(pwd) src/github.com/git-lfs/%{name}
 %endif
 
 pushd src/github.com/git-lfs/%{name}
-  %if %{_arch} == i386
+  %if "%{_arch}" == "i386"
     GOARCH=386 FORCE_LOCALIZE=true make
   %else
     GOARCH=amd64 FORCE_LOCALIZE=true make
@@ -46,8 +46,10 @@ make man
 install -D bin/git-lfs ${RPM_BUILD_ROOT}/usr/bin/git-lfs
 mkdir -p -m 755 ${RPM_BUILD_ROOT}/usr/share/man/man1
 mkdir -p -m 755 ${RPM_BUILD_ROOT}/usr/share/man/man5
+mkdir -p -m 755 ${RPM_BUILD_ROOT}/usr/share/man/man7
 install -D man/man1/*.1 ${RPM_BUILD_ROOT}/usr/share/man/man1
 install -D man/man5/*.5 ${RPM_BUILD_ROOT}/usr/share/man/man5
+install -D man/man7/*.7 ${RPM_BUILD_ROOT}/usr/share/man/man7
 
 %post
 # The --skip-repo option prevents failure if / is a Git repository with existing
@@ -69,7 +71,7 @@ export SKIPAPITESTCOMPILE=1
 
 pushd src/github.com/git-lfs/%{name}
   make test
-  make -C t PROVE_EXTRA_ARGS=-j4 test
+  make -C t PROVE_EXTRA_ARGS=-j9 test
 popd
 
 rm -rf ${GIT_LFS_TEST_DIR}
@@ -83,6 +85,7 @@ rm -rf %{buildroot}
 /usr/bin/git-lfs
 /usr/share/man/man1/*.1.gz
 /usr/share/man/man5/*.5.gz
+/usr/share/man/man7/*.7.gz
 
 %changelog
 * Sun Dec 6 2015 Andrew Neff <andyneff@users.noreply.github.com> - 1.1.0-1

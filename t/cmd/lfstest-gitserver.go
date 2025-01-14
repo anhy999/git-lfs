@@ -20,13 +20,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"log"
 	"math"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
+	"net/url"
 	"os"
 	"os/exec"
 	"regexp"
@@ -35,6 +35,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 )
 
 var (
@@ -58,11 +59,13 @@ var (
 		"status-batch-403", "status-batch-404", "status-batch-410", "status-batch-422", "status-batch-500",
 		"status-storage-403", "status-storage-404", "status-storage-410", "status-storage-422", "status-storage-500", "status-storage-503",
 		"status-batch-resume-206", "batch-resume-fail-fallback", "return-expired-action", "return-expired-action-forever", "return-invalid-size",
-		"object-authenticated", "storage-download-retry", "storage-upload-retry", "storage-upload-retry-later", "unknown-oid",
+		"object-authenticated", "storage-download-retry", "storage-upload-retry", "storage-upload-retry-later", "storage-upload-retry-later-no-header", "unknown-oid",
 		"send-verify-action", "send-deprecated-links", "redirect-storage-upload", "storage-compress", "batch-hash-algo-empty", "batch-hash-algo-invalid",
+		"auth-bearer", "auth-multistage",
 	}
 
 	reqCookieReposRE = regexp.MustCompile(`\A/require-cookie-`)
+	dekInfoRE        = regexp.MustCompile(`DEK-Info: AES-128-CBC,([a-fA-F0-9]*)`)
 )
 
 func main() {
@@ -129,7 +132,7 @@ func main() {
 	sslurlname := writeTestStateFile([]byte(serverTLS.URL), "LFSTEST_SSL_URL", "lfstest-gitserver-ssl")
 	defer os.RemoveAll(sslurlname)
 
-	clientCertUrlname := writeTestStateFile([]byte(serverClientCert.URL), "LFSTEST_CLIENT_CERT_URL", "lfstest-gitserver-ssl")
+	clientCertUrlname := writeTestStateFile([]byte(serverClientCert.URL), "LFSTEST_CLIENT_CERT_URL", "lfstest-gitserver-client-cert-url")
 	defer os.RemoveAll(clientCertUrlname)
 
 	block := &pem.Block{}
@@ -154,7 +157,10 @@ func main() {
 	debug("init", "server client cert url: %s", serverClientCert.URL)
 
 	<-stopch
-	debug("init", "git server done")
+	server.Close()
+	serverTLS.Close()
+	serverClientCert.Close()
+	debug("close", "git server done")
 }
 
 // writeTestStateFile writes contents to either the file referenced by the
@@ -252,6 +258,7 @@ func lfsHandler(w http.ResponseWriter, r *http.Request, id string) {
 }
 
 func lfsUrl(repo, oid string, redirect bool) string {
+	repo = url.QueryEscape(repo)
 	if redirect {
 		return server.URL + "/redirect307/objects/" + oid + "?r=" + repo
 	}
@@ -374,7 +381,7 @@ func lfsBatchHandler(w http.ResponseWriter, r *http.Request, id, repo string) {
 	}
 
 	if repo == "netrctest" {
-		user, pass, err := extractAuth(r.Header.Get("Authorization"))
+		_, user, pass, err := extractAuth(r.Header.Get("Authorization"))
 		if err != nil || (user != "netrcuser" || pass != "netrcpass") {
 			w.WriteHeader(403)
 			return
@@ -389,7 +396,7 @@ func lfsBatchHandler(w http.ResponseWriter, r *http.Request, id, repo string) {
 	tee := io.TeeReader(r.Body, buf)
 	objs := &batchReq{}
 	err := json.NewDecoder(tee).Decode(objs)
-	io.Copy(ioutil.Discard, r.Body)
+	io.Copy(io.Discard, r.Body)
 	r.Body.Close()
 
 	debug(id, "REQUEST")
@@ -418,6 +425,16 @@ func lfsBatchHandler(w http.ResponseWriter, r *http.Request, id, repo string) {
 
 			w.Write([]byte("rate limit reached"))
 			fmt.Println("Setting header to: ", strconv.Itoa(timeLeft))
+			return
+		}
+	}
+
+	if strings.HasSuffix(repo, "batch-retry-later-no-header") {
+		if _, isWaiting := checkRateLimit("batch", "", repo, ""); isWaiting {
+			w.WriteHeader(http.StatusTooManyRequests)
+
+			w.Write([]byte("rate limit reached"))
+			fmt.Println("Not setting Retry-After header")
 			return
 		}
 	}
@@ -709,6 +726,14 @@ func storageHandler(w http.ResponseWriter, r *http.Request) {
 				fmt.Println("Setting header to: ", strconv.Itoa(timeLeft))
 				return
 			}
+		case "storage-upload-retry-later-no-header":
+			if _, isWaiting := checkRateLimit("storage", "upload", repo, oid); isWaiting {
+				w.WriteHeader(http.StatusTooManyRequests)
+
+				w.Write([]byte("rate limit reached"))
+				fmt.Println("Not setting Retry-After header")
+				return
+			}
 		case "storage-compress":
 			if r.Header.Get("Accept-Encoding") != "gzip" {
 				w.WriteHeader(500)
@@ -757,6 +782,12 @@ func storageHandler(w http.ResponseWriter, r *http.Request) {
 					w.Header().Set("Retry-After", strconv.Itoa(secsToWait))
 					by = []byte("rate limit reached")
 					fmt.Println("Setting header to: ", strconv.Itoa(secsToWait))
+				}
+			} else if len(by) == len("storage-download-retry-later-no-header") && string(by) == "storage-download-retry-later-no-header" {
+				if _, wait := checkRateLimit("storage", "download", repo, oid); wait {
+					statusCode = http.StatusTooManyRequests
+					by = []byte("rate limit reached")
+					fmt.Println("Not setting Retry-After header")
 				}
 			} else if len(by) == len("storage-download-retry") && string(by) == "storage-download-retry" {
 				if retries, ok := incrementRetriesFor("storage", "download", repo, oid, false); ok && retries < 3 {
@@ -953,7 +984,7 @@ func validateTusHeaders(r *http.Request, id string) bool {
 
 func gitHandler(w http.ResponseWriter, r *http.Request) {
 	defer func() {
-		io.Copy(ioutil.Discard, r.Body)
+		io.Copy(io.Discard, r.Body)
 		r.Body.Close()
 	}()
 
@@ -965,6 +996,10 @@ func gitHandler(w http.ResponseWriter, r *http.Request) {
 		fmt.Sprintf("QUERY_STRING=%s", r.URL.RawQuery),
 		fmt.Sprintf("REQUEST_METHOD=%s", r.Method),
 		fmt.Sprintf("CONTENT_TYPE=%s", r.Header.Get("Content-Type")),
+	}
+
+	if vals := r.Header.Values("Git-Protocol"); len(vals) == 1 {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("GIT_PROTOCOL=%s", vals[0]))
 	}
 
 	buffer := &bytes.Buffer{}
@@ -1203,7 +1238,7 @@ func locksHandler(w http.ResponseWriter, r *http.Request, repo string) {
 	enc := json.NewEncoder(w)
 
 	if repo == "netrctest" {
-		user, pass, err := extractAuth(r.Header.Get("Authorization"))
+		_, user, pass, err := extractAuth(r.Header.Get("Authorization"))
 		if err != nil || (user == "netrcuser" && pass == "badpassretry") {
 			writeLFSError(w, 401, "Error: Bad Auth")
 			return
@@ -1419,7 +1454,7 @@ func missingRequiredCreds(w http.ResponseWriter, r *http.Request, repo string) b
 		return true
 	}
 
-	user, pass, err := extractAuth(auth)
+	_, user, pass, err := extractAuth(auth)
 	if err != nil {
 		writeLFSError(w, 403, err.Error())
 		return true
@@ -1552,23 +1587,26 @@ func newLfsStorage() *lfsStorage {
 	}
 }
 
-func extractAuth(auth string) (string, string, error) {
+func extractAuth(auth string) (string, string, string, error) {
 	if strings.HasPrefix(auth, "Basic ") {
 		decodeBy, err := base64.StdEncoding.DecodeString(auth[6:len(auth)])
 		decoded := string(decodeBy)
 
 		if err != nil {
-			return "", "", err
+			return "", "", "", err
 		}
 
 		parts := strings.SplitN(decoded, ":", 2)
 		if len(parts) == 2 {
-			return parts[0], parts[1], nil
+			return "Basic", parts[0], parts[1], nil
 		}
-		return "", "", nil
+		return "", "", "", nil
+	} else if strings.HasPrefix(auth, "Bearer ") || strings.HasPrefix(auth, "Multistage ") {
+		authtype, cred, _ := strings.Cut(auth, " ")
+		return authtype, "", cred, nil
 	}
 
-	return "", "", nil
+	return "", "", "", nil
 }
 
 func skipIfNoCookie(w http.ResponseWriter, r *http.Request, id string) bool {
@@ -1583,31 +1621,67 @@ func skipIfNoCookie(w http.ResponseWriter, r *http.Request, id string) bool {
 }
 
 func skipIfBadAuth(w http.ResponseWriter, r *http.Request, id string) bool {
+	wantedAuth := "Basic realm=\"testsuite\""
+	authHeader := "Lfs-Authenticate"
+	if strings.HasPrefix(r.URL.Path, "/auth-bearer") {
+		wantedAuth = "Bearer"
+		authHeader = "Www-Authenticate"
+	}
+
+	if strings.HasPrefix(r.URL.Path, "/auth-multistage") {
+		wantedAuth = "Multistage type=foo"
+		authHeader = "Www-Authenticate"
+	}
+
 	auth := r.Header.Get("Authorization")
 	if auth == "" {
+		w.Header().Add(authHeader, wantedAuth)
 		w.WriteHeader(401)
 		return true
 	}
 
-	user, pass, err := extractAuth(auth)
+	authtype, user, cred, err := extractAuth(auth)
 	if err != nil {
 		w.WriteHeader(403)
 		debug(id, "Error decoding auth: %s", err)
 		return true
 	}
 
-	switch user {
-	case "user":
-		if pass == "pass" {
+	if !strings.HasPrefix(wantedAuth, authtype) {
+		w.WriteHeader(403)
+		debug(id, "Unwanted auth: %s (wanted %q)", authtype, wantedAuth)
+		return true
+	}
+
+	switch authtype {
+	case "Basic":
+		switch user {
+		case "user":
+			if cred == "pass" {
+				return false
+			}
+		case "netrcuser", "requirecreds":
+			return false
+		case "path":
+			if strings.HasPrefix(r.URL.Path, "/"+cred) {
+				return false
+			}
+			debug(id, "auth attempt against: %q", r.URL.Path)
+		}
+	case "Bearer":
+		if cred == "token" {
 			return false
 		}
-	case "netrcuser", "requirecreds":
-		return false
-	case "path":
-		if strings.HasPrefix(r.URL.Path, "/"+pass) {
+	case "Multistage":
+		if cred == "cred1" {
+			wantedAuth = "Multistage type=bar"
+			w.Header().Add(authHeader, wantedAuth)
+			w.WriteHeader(401)
+			debug(id, "auth stage 1 succeeded: %q", auth)
+			return true
+		} else if cred == "cred2" {
 			return false
 		}
-		debug(id, "auth attempt against: %q", r.URL.Path)
 	}
 
 	w.WriteHeader(403)
@@ -1701,6 +1775,20 @@ func generateClientCertificates(rootCert *x509.Certificate, rootKey interface{})
 		log.Fatalf("creating encrypted private key: %v", err)
 	}
 	clientKeyEncPEM = pem.EncodeToMemory(clientKeyEnc)
+
+	// ensure salt is in uppercase hexadecimal for gnutls library v3.7.x:
+	// https://github.com/gnutls/gnutls/commit/4604bbde14d2c6adb2af5315f9063ad65ab50aa6
+	// https://github.com/gnutls/gnutls/blob/a0aa4780892dcc3c14cc10d823f8766ac75bcd85/lib/x509/privkey_openssl.c#L205-L206
+	dekInfoIndexes := dekInfoRE.FindSubmatchIndex(clientKeyEncPEM)
+	if dekInfoIndexes == nil || len(dekInfoIndexes) != 4 {
+		log.Fatalf("DEK-Info header not found in encrypted private key: %s", string(clientKeyEncPEM))
+	}
+	for i := dekInfoIndexes[2]; i < dekInfoIndexes[3]; i++ {
+		c := clientKeyEncPEM[i]
+		if c >= 'a' && c <= 'f' {
+			clientKeyEncPEM[i] = byte(unicode.ToUpper(rune(c)))
+		}
+	}
 
 	return
 }

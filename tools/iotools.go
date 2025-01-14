@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"hash"
 	"io"
-	"io/ioutil"
 	"os"
 
 	"github.com/git-lfs/git-lfs/v3/errors"
@@ -122,11 +121,14 @@ func Spool(to io.Writer, from io.Reader, dir string) (n int64, err error) {
 	if err != io.EOF {
 		// If we weren't at the end of the stream, create a temporary
 		// file, and spool the remaining contents there.
-		tmp, err := ioutil.TempFile(dir, "")
+		tmp, err := os.CreateTemp(dir, "")
 		if err != nil {
 			return 0, errors.Wrap(err, tr.Tr.Get("Unable to create temporary file for spooling"))
 		}
-		defer os.Remove(tmp.Name())
+		defer func() {
+			tmp.Close()
+			os.Remove(tmp.Name())
+		}()
 
 		if n, err = io.Copy(tmp, from); err != nil {
 			return n, errors.Wrap(err, tr.Tr.Get("unable to spool"))

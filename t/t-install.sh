@@ -74,19 +74,19 @@ begin_test "install updates repo hooks"
   git init
 
   pre_push_hook="#!/bin/sh
-command -v git-lfs >/dev/null 2>&1 || { echo >&2 \"\\nThis repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting '.git/hooks/pre-push'.\\n\"; exit 2; }
+command -v git-lfs >/dev/null 2>&1 || { printf >&2 \"\\n%s\\n\\n\" \"This repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting the 'pre-push' file in the hooks directory (set by 'core.hookspath'; usually '.git/hooks').\"; exit 2; }
 git lfs pre-push \"\$@\""
 
   post_checkout_hook="#!/bin/sh
-command -v git-lfs >/dev/null 2>&1 || { echo >&2 \"\\nThis repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting '.git/hooks/post-checkout'.\\n\"; exit 2; }
+command -v git-lfs >/dev/null 2>&1 || { printf >&2 \"\\n%s\\n\\n\" \"This repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting the 'post-checkout' file in the hooks directory (set by 'core.hookspath'; usually '.git/hooks').\"; exit 2; }
 git lfs post-checkout \"\$@\""
 
   post_commit_hook="#!/bin/sh
-command -v git-lfs >/dev/null 2>&1 || { echo >&2 \"\\nThis repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting '.git/hooks/post-commit'.\\n\"; exit 2; }
+command -v git-lfs >/dev/null 2>&1 || { printf >&2 \"\\n%s\\n\\n\" \"This repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting the 'post-commit' file in the hooks directory (set by 'core.hookspath'; usually '.git/hooks').\"; exit 2; }
 git lfs post-commit \"\$@\""
 
   post_merge_hook="#!/bin/sh
-command -v git-lfs >/dev/null 2>&1 || { echo >&2 \"\\nThis repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting '.git/hooks/post-merge'.\\n\"; exit 2; }
+command -v git-lfs >/dev/null 2>&1 || { printf >&2 \"\\n%s\\n\\n\" \"This repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting the 'post-merge' file in the hooks directory (set by 'core.hookspath'; usually '.git/hooks').\"; exit 2; }
 git lfs post-merge \"\$@\""
 
   [ "Updated Git hooks.
@@ -234,6 +234,32 @@ begin_test "install --local"
 )
 end_test
 
+begin_test "install --file"
+(
+  set -e
+
+  # old values that should be ignored by `install --local`
+  git config --global filter.lfs.smudge "global smudge"
+  git config --global filter.lfs.clean "global clean"
+  git config --global filter.lfs.process "global filter"
+
+  mkdir install-file-repo
+  cd install-file-repo
+  git init
+  git lfs install --file=test-file
+
+  # local configs are correct
+  [ "git-lfs smudge -- %f" = "$(git config --file test-file filter.lfs.smudge)" ]
+  [ "git-lfs clean -- %f" = "$(git config --file test-file filter.lfs.clean)" ]
+  [ "git-lfs filter-process" = "$(git config --file test-file filter.lfs.process)" ]
+
+  # global configs
+  [ "global smudge" = "$(git config --global filter.lfs.smudge)" ]
+  [ "global clean" = "$(git config --global filter.lfs.clean)" ]
+  [ "global filter" = "$(git config --global filter.lfs.process)" ]
+)
+end_test
+
 begin_test "install --local with failed permissions"
 (
   set -e
@@ -300,7 +326,7 @@ begin_test "install --local with conflicting scope"
   res=$?
   set -e
 
-  [ "Only one of --local and --system options can be specified." = "$(cat err.log)" ]
+  [ "Only one of the --local, --system, --worktree, and --file options can be specified." = "$(cat err.log)" ]
   [ "0" != "$res" ]
 )
 end_test

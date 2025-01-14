@@ -240,6 +240,17 @@ begin_test "migrate info (include/exclude ref with filter)"
 )
 end_test
 
+begin_test "migrate info (invalid ref)"
+(
+  set -e
+  remove_and_create_local_repo "migrate-info-invalid-ref"
+  git commit --allow-empty -m "initial commit"
+
+  git lfs migrate info jibberish >migrate.log 2>&1 && exit 1
+  grep "can't resolve ref" migrate.log
+)
+end_test
+
 begin_test "migrate info (nested sub-trees, no filter)"
 (
   set -e
@@ -282,7 +293,7 @@ begin_test "migrate info (above threshold, top)"
 
   setup_multiple_local_branches
 
-  base64 < /dev/urandom | head -c 160 > b.bin
+  lfstest-genrandom --base64 160 >b.bin
   git add b.bin
   git commit -m "b.bin"
 
@@ -305,7 +316,7 @@ begin_test "migrate info (top)"
 
   setup_multiple_local_branches
 
-  base64 < /dev/urandom | head -c 160 > b.bin
+  lfstest-genrandom --base64 160 >b.bin
   git add b.bin
   git commit -m "b.bin"
 
@@ -482,7 +493,7 @@ EOF
 )
 end_test
 
-begin_test "migrate info (--fixup, no .gitattributes)"
+begin_test "migrate info (no potential fixup, --fixup, no .gitattributes)"
 (
   set -e
 
@@ -491,7 +502,31 @@ begin_test "migrate info (--fixup, no .gitattributes)"
   original_head="$(git rev-parse HEAD)"
 
   # Ensure "fixup" command reports nothing if no files are tracked by LFS.
-  [ "0" -eq "$(git lfs migrate info --everything --fixup 2>/dev/null | wc -l)" ]
+  git lfs migrate info --everything --fixup >migrate.log
+  [ "0" -eq "$(cat migrate.log | wc -l)" ]
+
+  migrated_head="$(git rev-parse HEAD)"
+
+  assert_ref_unmoved "HEAD" "$original_head" "$migrated_head"
+)
+end_test
+
+begin_test "migrate info (no potential fixup, --fixup, .gitattributes with macro)"
+(
+  set -e
+
+  setup_multiple_local_branches
+
+  echo "[attr]foo foo" >.gitattributes
+  lfstest-genrandom --base64 30 >a.md
+  git add .gitattributes a.md
+  git commit -m macro
+
+  original_head="$(git rev-parse HEAD)"
+
+  # Ensure "fixup" command reports nothing if no files are tracked by LFS.
+  git lfs migrate info --everything --fixup >migrate.log
+  [ "0" -eq "$(cat migrate.log | wc -l)" ]
 
   migrated_head="$(git rev-parse HEAD)"
 
@@ -752,6 +787,48 @@ begin_test "migrate info (potential fixup, --fixup)"
   assert_ref_unmoved "HEAD" "$original_head" "$migrated_head"
 )
 end_test
+
+begin_test "migrate info (potential fixup, --fixup, .gitattributes with macro)"
+(
+  set -e
+
+  setup_single_local_branch_tracked_corrupt macro
+
+  original_head="$(git rev-parse HEAD)"
+
+  # Ensure "fixup" command reports files which should be tracked but have not
+  # been stored properly as LFS pointers, and ignores .gitattributes files.
+  diff -u <(git lfs migrate info --fixup 2>&1 | tail -n 1) <(cat <<-EOF
+	*.txt	120 B	1/1 file 	100%
+	EOF)
+
+  migrated_head="$(git rev-parse HEAD)"
+
+  assert_ref_unmoved "HEAD" "$original_head" "$migrated_head"
+)
+end_test
+
+# NOTE: We skip this test for now as the "git lfs migrate" commands do not
+#       fully process macro attribute definitions yet.
+#begin_test "migrate info (potential fixup, --fixup, .gitattributes with LFS macro)"
+#(
+#  set -e
+#
+#  setup_single_local_branch_tracked_corrupt lfsmacro
+#
+#  original_head="$(git rev-parse HEAD)"
+#
+#  # Ensure "fixup" command reports files which should be tracked but have not
+#  # been stored properly as LFS pointers, and ignores .gitattributes files.
+#  diff -u <(git lfs migrate info --fixup 2>&1 | tail -n 1) <(cat <<-EOF
+#	*.txt	120 B	1/1 file 	100%
+#	EOF)
+#
+#  migrated_head="$(git rev-parse HEAD)"
+#
+#  assert_ref_unmoved "HEAD" "$original_head" "$migrated_head"
+#)
+#end_test
 
 begin_test "migrate info (potential fixup, complex nested)"
 (

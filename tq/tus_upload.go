@@ -2,7 +2,6 @@ package tq
 
 import (
 	"io"
-	"io/ioutil"
 	"os"
 	"strconv"
 	"strings"
@@ -150,13 +149,13 @@ func (a *tusUploadAdapter) DoTransfer(ctx interface{}, t *Transfer, cb ProgressC
 		))
 	}
 
-	io.Copy(ioutil.Discard, res.Body)
+	io.Copy(io.Discard, res.Body)
 	res.Body.Close()
 
 	return verifyUpload(a.apiClient, a.remote, t)
 }
 
-func configureTusAdapter(m *Manifest) {
+func configureTusAdapter(m *concreteManifest) {
 	m.RegisterNewAdapterFunc(TusAdapterName, Upload, func(name string, dir Direction) Adapter {
 		switch dir {
 		case Upload:

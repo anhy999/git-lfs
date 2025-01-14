@@ -1,5 +1,338 @@
 # Git LFS Changelog
 
+## 3.6.0 (20 November 2024)
+
+This release is a feature release which includes support for multi-stage
+authentication with Git credential helpers (requires Git 2.46.0) and
+relative worktree paths (requires Git 2.48.0), a new object transfer batch
+size configuration option, better path handling when installing on Windows,
+more POSIX-compliant hook scripts, and improved performance with sparse
+checkouts, partial clones, and Git remotes with large numbers of tags.
+
+Note that the 3.6.x series of Git LFS releases will be the last releases
+for which we provide packages or support for versions of any Linux
+distribution based on either Red Hat Enterprise Linux 7 (RHEL 7) or
+SUSE Linux Enterprise Server 12 (SLES 12).
+
+Note also that the 3.6.x series of Git LFS releases may be the last
+releases for which we provide packages or support for versions of any
+Linux distribution based on Debian 10 ("buster").
+
+This release is built using Go v1.23 and therefore on macOS systems
+requires macOS 11 (Big Sur) or later, and on Windows systems requires
+at least Windows 10 or Windows Server 2016 (although Windows 8.1 may
+suffice).
+
+We would like to extend a special thanks to the following open-source
+contributors:
+
+* @blanet for fixing a crash bug when handling HTTP 429 responses
+* @bogomolets-owl for implementing a batch size configuration option
+* @ConcurrentCrab for preventing hung SSH transfer protocol connections
+* @jochenhz for ensuring files with Unicode names are not accidentally pruned
+* @pastelsky for optimizing performance of our pre-push hook
+* @rustfix for correcting some code comments
+* @rusttech for fixing an array size allocation bug
+* @xdavidwu for improving the portability of our tests and hooks
+
+### Features
+
+* git: improve sparse checkout support #5796 (@bk2204)
+* hook: fix newlines in command missing message #5886 (@xdavidwu)
+* Add batch size config value and use it everywhere #5876 (@bogomolets-owl)
+* Support relative paths to linked working trees #5898 (@chrisd8088)
+* git-lfs: omit tags in ls-remote; optimize pre-push #5863 (@pastelsky)
+* Support multistage authentication with a Git credential helper #5803 (@bk2204)
+* Support arbitrary HTTP credential schemes for authentication #5779 (@bk2204)
+* Optimize performance for scanning trees in partial clones #5699 (@bk2204)
+* Use lower-case file extensions in Windows installer path checks #5688 (@chrisd8088)
+* Match `PATH` case insensitively in Windows installer #5680 (@bk2204)
+
+### Bugs
+
+* Fix crash during pure SSH object transfer with multiple objects #5905 (@chrisd8088)
+* ssh: fix connection creation "leaking" connections #5816 (@ConcurrentCrab)
+* fix: fix slice init length #5874 (@rusttech)
+* Fix panic caused by accessing non-existent header #5804 (@blanet)
+* Avoid deadlocking on log scanning with lots of output on stderr #5738 (@bk2204)
+* checkout: gracefully handle files deleted from the index #5698 (@bk2204)
+* Fix logScanner fails to parse pointer file containing unicode chars #5655 (@jochenhz)
+
+### Misc
+
+* Fix improper negated test expressions and refine TLS client certificate tests #5914 (@chrisd8088)
+* Always capture clone logs in tests and remove or update stale workarounds #5906 (@chrisd8088)
+* Update Linux distribution package list for v3.6.0 release #5911 (@chrisd8088)
+* doc: mention the pointer size constraint #5900 (@bk2204)
+* Repair and restore all tests of cloning over TLS #5882 (@chrisd8088)
+* t: increase portability #5887 (@xdavidwu)
+* script/build-git: update Ubuntu 24.04 APT sources #5889 (@chrisd8088)
+* Run tests in parallel on Windows and always cleanup test directories #5879 (@chrisd8088)
+* Update release workflow to use Windows Trusted Signing Action #5873 (@chrisd8088)
+* Upgrade to Go 1.23 #5872 (@chrisd8088)
+* Use custom random data generator for all test objects and filenames #5868 (@chrisd8088)
+* Always build Git against custom libcurl in CI workflows on macOS #5866 (@chrisd8088)
+* Use expected version of Git on macOS in CI jobs #5813 (@chrisd8088)
+* Move @bk2204 to alumni #5808 (@bk2204)
+* docs/api: note API clients may send `charset` parameter in `Content-Type` header #5778 (@chrisd8088)
+* issue template: add more information we'd want to see #5728 (@bk2204)
+* .github/workflows: use actions/setup-go everywhere #5729 (@bk2204)
+* build(deps): bump golang.org/x/net from 0.17.0 to 0.23.0 #5718 (@dependabot[bot])
+* chore: fix function names in comment #5709 (@rustfix)
+* Include remote error when pure SSH protocol fails #5674 (@bk2204)
+* Build release assets with 1.22 #5673 (@bk2204)
+* Build release assets with Go 1.21 #5668 (@bk2204)
+* script/packagecloud: instantiate distro map properly #5662 (@bk2204)
+* Install msgfmt on Windows in CI and release workflows #5666 (@chrisd8088)
+
+## 3.5.0 (28 February 2024)
+
+This release is a feature release which includes support for LoongArch and
+RISC-V Linux binary tarballs, `FETCH_HEAD` as a remote source (from a plain
+`git fetch`), better support for detection of the system gitattributes file,
+and configuration options for the SSH protocol.  In this release, the
+`FETCH_HEAD` support is experimental and subject to change.
+
+We would like to extend a special thanks to the following open-source
+contributors:
+
+* @jochenhz for improvements to `git lfs prune`
+* @murez for improvements to our installation script
+* @qiangxuhui for tooling to build 64-bit LoongArch packages
+* @AaronDewes for tooling to build 64-bit RISC-V packages
+* @b-camacho for allowing `FETCH_HEAD` as a fallback remote source
+* @tigsikram for fixing some broken links
+* @aymanbagabas for fixing our SSH protocol documentation
+* @KyleFromKitware for improvements to the pure SSH protocol
+* @Juneezee for several code cleanups
+* @cmaves for improving performance of our progress indications
+* @QuLogic for improving completions and updating docs
+* @philip-peterson for helping detect invalid refs in `git lfs push`
+* @bogomolets-owl for helping include the reference specified in unlock requests
+
+### Features
+
+* Add --verify-unreachable option to LFS prune #5648 (@jochenhz)
+* attribute: warn if config exists after uninstalling #5635 (@bk2204)
+* Initialize sessions lazily #5634 (@bk2204)
+* Add a `--local` argument to install.sh #5618 (@murez)
+* Provide loong64 Binary Support #5607 (@qiangxuhui)
+* Improve locking performance #5561 (@bk2204)
+* Allow configuring the SSH protocol #5555 (@bk2204)
+* Add `FETCH_HEAD` as fallback remote source #5357 (@b-camacho)
+* Use `git var` to find system gitattributes file #5412 (@bk2204)
+* Add RISC-V support #5438 (@AaronDewes)
+
+### Bugs
+
+* Add support for homedir expansion in SSL key and cert paths #5657 (@bk2204)
+* Display correct status information when `git lfs ls-files` run in subdirectory #5653 (@chrisd8088)
+* Fix git lfs prune is deleting staged files in the index #5637 (@jochenhz)
+* Report invalid ref in `git lfs push` command #5639 (@chrisd8088)
+* Always close open files when cloning and spooling #5617 (@chrisd8088)
+* Fix git-scm.com links #5589 (@tigsikram)
+* doc: update ssh_adapter.md #5560 (@aymanbagabas)
+* track: don't modify `.gitattributes` with `--dry-run` #5559 (@bk2204)
+* Update project home page URL in Linux builds and remove unused spec files #5551 (@chrisd8088)
+* Retrieve endpoint URL only once when checking standalone transfer adapter configurations #5550 (@chrisd8088)
+* ssh: Specifically designate a master multiplex connection #5537 (@KyleFromKitware)
+* Include reference specifier in unlock requests #5538 (@chrisd8088)
+* tq/transfer: copy Id and Token #5534 (@KyleFromKitware)
+* Mock time in copy callback log file test #5524 (@chrisd8088)
+* track: reject attempts to modify `.gitattributes` #5515 (@bk2204)
+* Fix a panic in the credential code #5490 (@bk2204)
+* Avoid modifying the mtime of empty files #5491 (@bk2204)
+* Make track handle backslashes correctly on Unix #5482 (@bk2204)
+* Print an error when pushing with no refs #5437 (@bk2204)
+
+### Misc
+
+* workflows: update to Go 1.22 #5650 (@bk2204)
+* Distro updates for v3.5 #5647 (@bk2204)
+* Use Azure Code Signing for Windows release binaries #5630 (@bk2204)
+* Fix flaky test `t-credentials.sh` #5616 (@bk2204)
+* t: pipe random data to `base64(1)` to be compatible with macOS #5614 (@chrisd8088)
+* Replace deprecated `io/ioutil` functions #5595 (@Juneezee)
+* t/t-path.sh: avoid flaky test setup failure on Windows due to new Go path security checks #5611 (@chrisd8088)
+* build(deps): bump golang.org/x/crypto from 0.14.0 to 0.17.0 #5591 (@dependabot[bot])
+* Update release documentation and changelog summary script for patch releases #5590 (@chrisd8088)
+* Update notarization to use `notarytool` #5554 (@bk2204)
+* lfs: avoid unnecessary byte/string conversion #5552 (@Juneezee)
+* build(deps): bump golang.org/x/net from 0.7.0 to 0.17.0 #5541 (@dependabot[bot])
+* Limit CopyCallbackFile to print every 200 ms #5504 (@cmaves)
+* Update to Go 1.21 #5487 (@chrisd8088)
+* Add installation note about restarting shells on Windows for PATH changes #5507 (@chrisd8088)
+* Remove unused Docker scripts and update README #5506 (@chrisd8088)
+* Remove old and unused release script #5500 (@chrisd8088)
+* Update and expand documentation of the Git LFS release process #5452 (@chrisd8088)
+* Update cobra to 1.7.0 #5444 (@QuLogic)
+* Add FAQ entries for TLS data #5446 (@bk2204)
+* Remove vendoring instructions from contributing docs #5443 (@QuLogic)
+* FAQ: add an entry about proxies #5445 (@bk2204)
+* tq/transfer_test.go: enable and fix all tests #5442 (@chrisd8088)
+* Add a single source of truth for distro info #5439 (@bk2204)
+
+## 3.4.0 (26 July 2023)
+
+This release is a feature release which includes support for generating
+shell scripts for command-line tab-completion of Git LFS commands with
+the new `git-lfs-completion(1)` command, providing multiple headers to Git
+credential helpers (a new feature as of Git 2.41), and installing Git LFS
+with a Git configuration file stored under the XDG configuration path.
+
+Note that this release will be made by a different member of the core
+team than the person who performed many of the past releases, and thus
+this release will be signed with a different OpenPGP key.  Please follow
+[the steps in the README to download all of the keys for the core
+team](https://github.com/git-lfs/git-lfs#verifying-releases) to verify
+this release.
+
+We would like to extend a special thanks to the following open-source
+contributors:
+
+* @anihm136 for implementing shell completion script generation
+* @aymanbagabas for multiple fixes to our SSH and transfer queue code
+* @dscho for ensuring our Windows installer works on 32-bit systems
+* @dyrone for correcting an erroneous file name in our documentation
+* @jlosito for making sure our CI job actions are up to date
+* @nfgferreira for speeding up the track command on Windows
+* @ry167 for improving our Ubuntu installation instructions
+* @salvorizza for fixing a JSON bug in our unlock command
+* @slonopotamus for cleaning up accommodations for legacy Go versions
+* @steffen for improving our installation documentation
+
+### Features
+
+* Add support for `wwwauth[]` to credential helpers #5381 (@bk2204)
+* Add a `--file` option to install and uninstall #5355 (@bk2204)
+* Add shell completion generation #5311 (@anihm136)
+
+### Bugs
+
+* Handle local paths with trailing slashes #5402 (@bk2204)
+* Unlock by ID with JSON Flag returns empty array #5385 (@salvorizza)
+* Refactor macro attribute handling to prevent crashes with `--fixup` migration option #5382 (@chrisd8088)
+* locks: print warning about locking API to standard error #5350 (@bk2204)
+* Avoid needlessly spawning SSH connections with `git archive` #5309 (@bk2204)
+* standalone: print an error if the destination isn't a Git repository #5283 (@bk2204)
+* locks: ensure local locks are synced on error #5284 (@bk2204)
+* installer: let it work on 32-bit Windows again #5266 (@dscho)
+* fix(ssh): use /tmp to place control dir on darwin #5223 (@aymanbagabas)
+* commands: avoid remote connections in checkout #5226 (@bk2204)
+* fix(tq): stop adding transfers to queue after abort #5230 (@aymanbagabas)
+* fix: pure SSH list lock command name #5219 (@aymanbagabas)
+* git: match patterns, not file names, for tracked files #5423 (@bk2204)
+* Resolve git-lfs track slowness on Windows due to unneeded user lookup #5431 (@nfgferreira)
+
+### Misc
+
+* Update distributions #5392 (@bk2204)
+* workflows: remove refreshenv #5393 (@bk2204)
+* Refactor `GitScanner` and simplify implementation #5389 (@chrisd8088)
+* Ensure all logging tasks are closed and simplify log task dispatching #5375 (@chrisd8088)
+* FAQ: add entry on archiving subdirectories #5349 (@bk2204)
+* Drop pre-1.13 Go compatibility code #5364 (@slonopotamus)
+* Fix CI by enabling Git protocol v2 #5353 (@bk2204)
+* Clarify `git lfs migrate` handling of local and remote references #5327 (@chrisd8088)
+* Update to Go version 1.20 #5326 (@chrisd8088)
+* Remove stale video link #5325 (@chrisd8088)
+* Fix Windows CI with Go 1.20 #5317 (@bk2204)
+* Update Windows signing certificate hash #5300 (@chrisd8088)
+* t: avoid incorrect negated commands #5282 (@bk2204)
+* Update golang.org/x/text #5290 (@bk2204)
+* Improve error handling for pure SSH protocol #5063 (@bk2204)
+* workflow: use `choco install` #5281 (@bk2204)
+* Update Linux releases in Packagecloud publication script #5276 (@chrisd8088)
+* Simplify and deduplicate installation instructions #5260 (@steffen)
+* Make hooks refer to `core.hookspath` #5245 (@bk2204)
+* Update INSTALLING.md to fix ubuntu derivative command and allow easy install for some distros #5014 (@ry167)
+* Check for github action updates monthly #5228 (@jlosito)
+* Upgrade workflows to latest Ubuntu and Actions versions #5243 (@chrisd8088)
+* Upgrade GitHub Actions workflows to use `ruby/setup-ruby@v1` #5236 (@chrisd8088)
+* Add `git lfs migrate export` command examples to manual page #5239 (@chrisd8088)
+* Unset `GIT_TRACE` environment variable for Git commands in `Makefile` #5240 (@chrisd8088)
+* Clean up RPM builds and fix i686 RPM file names #5241 (@chrisd8088)
+* Add a FAQ entry on Jenkins problems #5177 (@bk2204)
+* Fix missing parameter in git lfs logs manual page #5414 (@chrisd8088)
+* proposals: fix filename typo #5425 (@dyrone)
+* Update shell tab-completion script support and add manual page #5429 (@chrisd8088)
+
+## 3.3.0 (30 November 2022)
+
+This release is a feature release which includes package support for Red Hat
+Enterprise Linux 9 and compatible OSes, experimental support for multiple
+remotes, and some command-line helpers for `git lfs push`.
+
+In this release, we no longer include vendored versions of our dependencies in
+the repository or the tarballs.  These were a source of noise and bloat, and
+users can easily download the required dependencies with Go itself.  Users who
+need to continue to vendor the dependencies can use the `make vendor` target.
+
+In addition, we've also switched the documentation to AsciiDoc from
+ronn-flavoured Markdown and included the FAQ in the repository.  This means that
+the manual pages now render properly in the GitHub web interface and it's also
+much easier to create additional formats, such as PDF, by leveraging the ability
+of Asciidoctor to convert to DocBook.
+
+It should also be noted that `git lfs migrate import --everything` now processes
+all refs that aren't special to Git instead of just branches and tags.  This is
+what it was documented to do, but didn't, so we've fixed it.
+
+Finally, please note that future releases may be done by a different member of
+the core team than many of the past releases, and thus may be signed by a
+different OpenPGP key.  Please follow [the steps in the README to download all
+of the keys for the core
+team](https://github.com/git-lfs/git-lfs#verifying-releases) to verify releases
+successfully in the future.
+
+We would like to extend a special thanks to the following open-source
+contributors:
+
+* @dhiwakarK for fixing a broken link
+* @dscho for improving our installer
+* @Leo1690 for speeding things up with sparse checkout
+* @pratap043 for proposing an extension to locking
+* @rcoup for fixing our Makefile and adding scripting features to `git lfs push`
+* @srohmen for adding support for alternative remotes
+* @WhatTheFuzz for improving our error messages
+* @wuhaochen for fixing a long-standing bug with `git lfs migrate import`
+
+### Features
+
+* Add the FAQ in the repository #5167 (@bk2204)
+* Add support for Rocky Linux 9 #5144 (@bk2204)
+* push: add ability to read refs/oids from stdin #5086 (@rcoup)
+* Allow alternative remotes to be handled by LFS #5066 (@srohmen)
+* Switch documentation to AsciiDoc #5054 (@bk2204)
+
+### Bugs
+
+* Handle macro attribute references with unspecified flag #5168 (@chrisd8088)
+* Fixed broken link for git-lfs-migrate #5153 (@dhiwakarK)
+* ssh: disable concurrent transfers if no multiplexing #5136 (@bk2204)
+* Fix setting commit & vendor variables via make #5141 (@rcoup)
+* ssh: don't leak resources when falling back to legacy protocol #5137 (@bk2204)
+* Bump gitobj to v2.1.1 #5130 (@bk2204)
+* tools: don't match MINGW as Cygwin #5106 (@bk2204)
+* installer: handle `BashOnly` Git for Windows gracefully #5048 (@dscho)
+* Change git-lfs migrate import --everything to migrate everything except for special git refs #5045 (@wuhaochen)
+
+### Misc
+
+* Use --sparse parameter for ls-files for performance optimization #5187 (@Leo1690)
+* Add information to ambiguous error message. #5172 (@WhatTheFuzz)
+* Distro update for v3.3.0 #5169 (@bk2204)
+* docs/man: clarify Git LFS setup instructions #5166 (@larsxschneider)
+* Update more stale comments relating to object scanning #5164 (@chrisd8088)
+* Update stale comments relating to object scanning and uploading #5163 (@chrisd8088)
+* script/cibuild: exclude icons from whitespace check #5142 (@bk2204)
+* Update to Go version 1.19 #5126 (@chrisd8088)
+* Drop vendoring #4903 (@bk2204)
+* Adding locking_notes.md #5079 (@pratap043)
+* t: set init.defaultBranch #5082 (@bk2204)
+* go.mod: require gopkg.in/yaml.v3 v3.0.1 #5033 (@bk2204)
+* script/upload: improve readability of asset verification #5032 (@bk2204)
+
 ## 3.2.0 (25 May 2022)
 
 This release is a feature release which includes support for machine-readable

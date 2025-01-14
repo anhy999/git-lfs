@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"os/exec"
@@ -63,7 +62,11 @@ func main() {
 	if err := acquire(ctx); err != nil {
 		fatal(err)
 	}
-	defer release()
+	defer func() {
+		if err := release(); err != nil {
+			fmt.Fprintf(os.Stderr, "unable to release lock file: %s\n", err)
+		}
+	}()
 
 	if len(os.Args) == 1 {
 		// Calling with no arguments indicates that we simply want to
@@ -142,7 +145,7 @@ func main() {
 
 			// Otherwise, we need to POST to /shutdown, which will
 			// cause the lfstest-gitserver to abort itself.
-			url, err := ioutil.ReadFile(os.Getenv("LFS_URL_FILE"))
+			url, err := os.ReadFile(os.Getenv("LFS_URL_FILE"))
 			if err == nil {
 				_, err = http.Post(string(url)+"/shutdown",
 					"application/text",
@@ -167,10 +170,6 @@ var (
 // acquire acquires the lock file necessary to perform updates to test_count,
 // and returns an error if that lock cannot be acquired.
 func acquire(ctx context.Context) error {
-	if disabled() {
-		return nil
-	}
-
 	path, err := path(lockFile)
 	if err != nil {
 		return err
@@ -184,8 +183,11 @@ func acquire(ctx context.Context) error {
 		case <-tick.C:
 			// Try every tick of the above ticker before giving up
 			// and trying again.
-			_, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL, 0666)
+			f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0666)
 			if err == nil || !os.IsExist(err) {
+				if err == nil {
+					f.Close()
+				}
 				return err
 			}
 		case <-ctx.Done():
@@ -199,10 +201,6 @@ func acquire(ctx context.Context) error {
 // release releases the lock file so that another process can take over, or
 // returns an error.
 func release() error {
-	if disabled() {
-		return nil
-	}
-
 	path, err := path(lockFile)
 	if err != nil {
 		return err
@@ -225,7 +223,7 @@ func callWithCount(fn countFn) error {
 		return err
 	}
 
-	contents, err := ioutil.ReadAll(f)
+	contents, err := io.ReadAll(f)
 	if err != nil {
 		return err
 	}
@@ -267,20 +265,10 @@ func callWithCount(fn countFn) error {
 // 't' directory of the current checkout of Git LFS.
 func path(s string) (string, error) {
 	p := filepath.Join(filepath.Dir(os.Getenv("LFSTEST_DIR")), s)
-	if err := os.MkdirAll(filepath.Dir(p), 0666); err != nil {
+	if err := os.MkdirAll(filepath.Dir(p), 0777); err != nil {
 		return "", err
 	}
 	return p, nil
-}
-
-// disabled returns true if and only if the lock acquisition phase is disabled.
-func disabled() bool {
-	s := os.Getenv("GIT_LFS_LOCK_ACQUIRE_DISABLED")
-	b, err := strconv.ParseBool(s)
-	if err != nil {
-		return false
-	}
-	return b
 }
 
 // fatal reports the given error (if non-nil), and then dies. If the error was

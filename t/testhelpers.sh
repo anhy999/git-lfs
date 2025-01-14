@@ -62,7 +62,7 @@ assert_local_object() {
   local oid="$1"
   local size="$2"
   local cfg=`git lfs env | grep LocalMediaDir`
-  local f="${cfg:14}/${oid:0:2}/${oid:2:2}/$oid"
+  local f="${cfg#LocalMediaDir=}/${oid:0:2}/${oid:2:2}/$oid"
   actualsize=$(wc -c <"$f" | tr -d '[[:space:]]')
   if [ "$size" != "$actualsize" ]; then
     exit 1
@@ -79,8 +79,7 @@ refute_local_object() {
   local oid="$1"
   local size="$2"
   local cfg=`git lfs env | grep LocalMediaDir`
-  local regex="LocalMediaDir=(\S+)"
-  local f="${cfg:14}/${oid:0:2}/${oid:2:2}/$oid"
+  local f="${cfg#LocalMediaDir=}/${oid:0:2}/${oid:2:2}/$oid"
   if [ -e $f ]; then
     if [ -z "$size" ]; then
       exit 1
@@ -99,7 +98,7 @@ refute_local_object() {
 delete_local_object() {
   local oid="$1"
   local cfg=`git lfs env | grep LocalMediaDir`
-  local f="${cfg:14}/${oid:0:2}/${oid:2:2}/$oid"
+  local f="${cfg#LocalMediaDir=}/${oid:0:2}/${oid:2:2}/$oid"
   rm "$f"
 }
 
@@ -108,7 +107,7 @@ delete_local_object() {
 corrupt_local_object() {
   local oid="$1"
   local cfg=`git lfs env | grep LocalMediaDir`
-  local f="${cfg:14}/${oid:0:2}/${oid:2:2}/$oid"
+  local f="${cfg#LocalMediaDir=}/${oid:0:2}/${oid:2:2}/$oid"
   cp /dev/null "$f"
 }
 
@@ -174,6 +173,22 @@ assert_server_object() {
     cat http.json
     exit 1
   }
+}
+
+# assert_remote_object() confirms that an object file with the given OID and
+# size is stored in the "remote" copy of a repository
+assert_remote_object() {
+  local reponame="$1"
+  local oid="$2"
+  local size="$3"
+  local destination="$(canonical_path "$REMOTEDIR/$reponame.git")"
+
+  pushd "$destination"
+    local cfg="$(git lfs env | grep LocalMediaDir)"
+    local f="${cfg#LocalMediaDir=}/${oid:0:2}/${oid:2:2}/$oid"
+    actualsize="$(wc -c <"$f" | tr -d '[[:space:]]')"
+    [ "$size" -eq "$actualsize" ]
+  popd
 }
 
 check_server_lock_ssh() {
@@ -417,12 +432,16 @@ clone_repo() {
   local reponame="$1"
   local dir="$2"
   echo "clone local git repository $reponame to $dir"
-  out=$(git clone "$GITSERVER/$reponame" "$dir" 2>&1)
+  git clone "$GITSERVER/$reponame" "$dir" 2>&1 | tee clone.log
+
+  if [ "0" -ne "${PIPESTATUS[0]}" ]; then
+    return 1
+  fi
+
   cd "$dir"
+  mv ../clone.log .
 
   git config credential.helper lfstest
-  echo "$out" > clone.log
-  echo "$out"
 }
 
 # clone_repo_url clones a Git repository to the subdirectory $dir under $TRASHDIR.
@@ -433,12 +452,16 @@ clone_repo_url() {
   local repo="$1"
   local dir="$2"
   echo "clone git repository $repo to $dir"
-  out=$(git clone "$repo" "$dir" 2>&1)
+  git clone "$repo" "$dir" 2>&1 | tee clone.log
+
+  if [ "0" -ne "${PIPESTATUS[0]}" ]; then
+    return 1
+  fi
+
   cd "$dir"
+  mv ../clone.log .
 
   git config credential.helper lfstest
-  echo "$out" > clone.log
-  echo "$out"
 }
 
 # clone_repo_ssl clones a repository from the test Git server to the subdirectory
@@ -450,13 +473,16 @@ clone_repo_ssl() {
   local reponame="$1"
   local dir="$2"
   echo "clone local git repository $reponame to $dir"
-  out=$(git clone "$SSLGITSERVER/$reponame" "$dir" 2>&1)
+  git clone "$SSLGITSERVER/$reponame" "$dir" 2>&1 | tee clone_ssl.log
+
+  if [ "0" -ne "${PIPESTATUS[0]}" ]; then
+    return 1
+  fi
+
   cd "$dir"
+  mv ../clone_ssl.log .
 
   git config credential.helper lfstest
-
-  echo "$out" > clone_ssl.log
-  echo "$out"
 }
 
 # clone_repo_clientcert clones a repository from the test Git server to the subdirectory
@@ -468,26 +494,16 @@ clone_repo_clientcert() {
   local reponame="$1"
   local dir="$2"
   echo "clone $CLIENTCERTGITSERVER/$reponame to $dir"
-  set +e
-  out=$(git clone "$CLIENTCERTGITSERVER/$reponame" "$dir" 2>&1)
-  res="${PIPESTATUS[0]}"
-  set -e
+  git clone "$CLIENTCERTGITSERVER/$reponame" "$dir" 2>&1 | tee clone_client_cert.log
 
-  if [ "0" -eq "$res" ]; then
-    cd "$dir"
-    echo "$out" > clone_client_cert.log
-
-    git config credential.helper lfstest
-    return 0
+  if [ "0" -ne "${PIPESTATUS[0]}" ]; then
+    return 1
   fi
 
-  echo "$out" > clone_client_cert.log
-  if [ $(grep -c "NSInvalidArgumentException" clone_client_cert.log) -gt 0 ]; then
-    echo "client-cert-mac-openssl" > clone_client_cert.log
-    return 0
-  fi
+  cd "$dir"
+  mv ../clone_client_cert.log .
 
-  return 1
+  git config credential.helper lfstest
 }
 
 # setup_remote_repo_with_file creates a remote repo, clones it locally, commits
@@ -557,6 +573,11 @@ write_creds_file() {
   fi
 }
 
+setup_creds() {
+  mkdir -p "$CREDSDIR"
+  write_creds_file ":user:pass" "$CREDSDIR/127.0.0.1"
+}
+
 # setup initializes the clean, isolated environment for integration tests.
 setup() {
   cd "$ROOTDIR"
@@ -569,17 +590,15 @@ setup() {
   git lfs version | sed -e 's/^/# /g'
   git version | sed -e 's/^/# /g'
 
-  if [ -z "$GIT_LFS_NO_TEST_COUNT" ]; then
-    LFSTEST_URL="$LFS_URL_FILE" \
-    LFSTEST_SSL_URL="$LFS_SSL_URL_FILE" \
-    LFSTEST_CLIENT_CERT_URL="$LFS_CLIENT_CERT_URL_FILE" \
-    LFSTEST_DIR="$REMOTEDIR" \
-    LFSTEST_CERT="$LFS_CERT_FILE" \
-    LFSTEST_CLIENT_CERT="$LFS_CLIENT_CERT_FILE" \
-    LFSTEST_CLIENT_KEY="$LFS_CLIENT_KEY_FILE" \
-    LFSTEST_CLIENT_KEY_ENCRYPTED="$LFS_CLIENT_KEY_FILE_ENCRYPTED" \
-      lfstest-count-tests increment
-  fi
+  LFSTEST_URL="$LFS_URL_FILE" \
+  LFSTEST_SSL_URL="$LFS_SSL_URL_FILE" \
+  LFSTEST_CLIENT_CERT_URL="$LFS_CLIENT_CERT_URL_FILE" \
+  LFSTEST_DIR="$REMOTEDIR" \
+  LFSTEST_CERT="$LFS_CERT_FILE" \
+  LFSTEST_CLIENT_CERT="$LFS_CLIENT_CERT_FILE" \
+  LFSTEST_CLIENT_KEY="$LFS_CLIENT_KEY_FILE" \
+  LFSTEST_CLIENT_KEY_ENCRYPTED="$LFS_CLIENT_KEY_FILE_ENCRYPTED" \
+    lfstest-count-tests increment
 
   wait_for_file "$LFS_URL_FILE"
   wait_for_file "$LFS_SSL_URL_FILE"
@@ -597,6 +616,10 @@ setup() {
     mkdir "$HOME"
   fi
 
+  # do not let Git use a different configuration file
+  unset GIT_CONFIG
+  unset XDG_CONFIG_HOME
+
   if [ ! -f $HOME/.gitconfig ]; then
     git lfs install --skip-repo
     git config --global credential.usehttppath true
@@ -604,19 +627,11 @@ setup() {
     git config --global user.name "Git LFS Tests"
     git config --global user.email "git-lfs@example.com"
     git config --global http.sslcainfo "$LFS_CERT_FILE"
-    git config --global http.$LFS_CLIENT_CERT_URL/.sslKey "$LFS_CLIENT_KEY_FILE"
-    git config --global http.$LFS_CLIENT_CERT_URL/.sslCert "$LFS_CLIENT_CERT_FILE"
-    git config --global http.$LFS_CLIENT_CERT_URL/.sslVerify "false"
     git config --global init.defaultBranch main
   fi | sed -e 's/^/# /g'
 
   # setup the git credential password storage
-  local certpath="$(echo "$LFS_CLIENT_CERT_FILE" | tr / -)"
-  local keypath="$(echo "$LFS_CLIENT_KEY_FILE_ENCRYPTED" | tr / -)"
-  mkdir -p "$CREDSDIR"
-  write_creds_file "user:pass" "$CREDSDIR/127.0.0.1"
-  write_creds_file ":pass" "$CREDSDIR/--$certpath"
-  write_creds_file ":pass" "$CREDSDIR/--$keypath"
+  setup_creds
 
   echo "#"
   echo "# HOME: $HOME"
@@ -638,10 +653,13 @@ shutdown() {
   # every t/t-*.sh file should cleanup its trashdir
   [ -z "$KEEPTRASH" ] && rm -rf "$TRASHDIR"
 
-  if [ -z "$GIT_LFS_NO_TEST_COUNT" ]; then
-    LFSTEST_DIR="$REMOTEDIR" \
-    LFS_URL_FILE="$LFS_URL_FILE" \
-      lfstest-count-tests decrement
+  LFSTEST_DIR="$REMOTEDIR" \
+  LFS_URL_FILE="$LFS_URL_FILE" \
+    lfstest-count-tests decrement
+
+  # delete entire lfs test root if we created it (double check pattern)
+  if [ -z "$KEEPTRASH" ] && [ "$RM_GIT_LFS_TEST_DIR" = "yes" ] && [[ $GIT_LFS_TEST_DIR == *"$TEMPDIR_PREFIX"* ]]; then
+    rm -rf "$GIT_LFS_TEST_DIR"
   fi
 }
 

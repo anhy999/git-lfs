@@ -3,7 +3,6 @@ package lfs
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -17,8 +16,10 @@ import (
 
 var (
 	// The basic hook which just calls 'git lfs TYPE'
-	hookBaseContent = "#!/bin/sh\ncommand -v git-lfs >/dev/null 2>&1 || { echo >&2 \"\\nThis repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting '.git/hooks/{{Command}}'.\\n\"; exit 2; }\ngit lfs {{Command}} \"$@\""
-	hookOldContent  = "#!/bin/sh\ncommand -v git-lfs >/dev/null 2>&1 || { echo >&2 \"\\nThis repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting .git/hooks/{{Command}}.\\n\"; exit 2; }\ngit lfs {{Command}} \"$@\""
+	hookBaseContent = "#!/bin/sh\ncommand -v git-lfs >/dev/null 2>&1 || { printf >&2 \"\\n%s\\n\\n\" \"This repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting the '{{Command}}' file in the hooks directory (set by 'core.hookspath'; usually '.git/hooks').\"; exit 2; }\ngit lfs {{Command}} \"$@\""
+	hookOldContent  = "#!/bin/sh\ncommand -v git-lfs >/dev/null 2>&1 || { echo >&2 \"\\nThis repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting the '{{Command}}' file in the hooks directory (set by 'core.hookspath'; usually '.git/hooks').\\n\"; exit 2; }\ngit lfs {{Command}} \"$@\""
+	hookOldContent2 = "#!/bin/sh\ncommand -v git-lfs >/dev/null 2>&1 || { echo >&2 \"\\nThis repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting '.git/hooks/{{Command}}'.\\n\"; exit 2; }\ngit lfs {{Command}} \"$@\""
+	hookOldContent3 = "#!/bin/sh\ncommand -v git-lfs >/dev/null 2>&1 || { echo >&2 \"\\nThis repository is configured for Git LFS but 'git-lfs' was not found on your path. If you no longer wish to use Git LFS, remove this hook by deleting .git/hooks/{{Command}}.\\n\"; exit 2; }\ngit lfs {{Command}} \"$@\""
 )
 
 // A Hook represents a githook as described in http://git-scm.com/docs/githooks.
@@ -41,10 +42,12 @@ func LoadHooks(hookDir string, cfg *config.Configuration) []*Hook {
 			"#!/bin/sh\ncommand -v git-lfs >/dev/null 2>&1 || { echo >&2 \"\\nThis repository has been set up with Git LFS but Git LFS is not installed.\\n\"; exit 0; }\ngit lfs pre-push \"$@\"",
 			"#!/bin/sh\ncommand -v git-lfs >/dev/null 2>&1 || { echo >&2 \"\\nThis repository has been set up with Git LFS but Git LFS is not installed.\\n\"; exit 2; }\ngit lfs pre-push \"$@\"",
 			hookOldContent,
+			hookOldContent2,
+			hookOldContent3,
 		}, cfg),
-		NewStandardHook("post-checkout", hookDir, []string{hookOldContent}, cfg),
-		NewStandardHook("post-commit", hookDir, []string{hookOldContent}, cfg),
-		NewStandardHook("post-merge", hookDir, []string{hookOldContent}, cfg),
+		NewStandardHook("post-checkout", hookDir, []string{hookOldContent, hookOldContent2, hookOldContent3}, cfg),
+		NewStandardHook("post-commit", hookDir, []string{hookOldContent, hookOldContent2, hookOldContent3}, cfg),
+		NewStandardHook("post-merge", hookDir, []string{hookOldContent, hookOldContent2, hookOldContent3}, cfg),
 	}
 }
 
@@ -99,7 +102,7 @@ func (h *Hook) Install(force bool) error {
 // end, and sets the mode to octal 0755. It writes to disk unconditionally, and
 // returns at any error.
 func (h *Hook) write() error {
-	return ioutil.WriteFile(h.Path(), []byte(h.Contents+"\n"), 0755)
+	return os.WriteFile(h.Path(), []byte(h.Contents+"\n"), 0755)
 }
 
 // Upgrade upgrades the (assumed to be) existing git hook to the current
@@ -148,7 +151,7 @@ func (h *Hook) matchesCurrent() (bool, bool, error) {
 		return false, false, err
 	}
 
-	by, err := ioutil.ReadAll(io.LimitReader(file, 1024))
+	by, err := io.ReadAll(io.LimitReader(file, 1024))
 	file.Close()
 	if err != nil {
 		return false, false, err

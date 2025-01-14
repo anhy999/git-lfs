@@ -2,6 +2,7 @@ package lfs
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/git-lfs/git-lfs/v3/git"
@@ -31,6 +32,7 @@ type Attribute struct {
 type FilterOptions struct {
 	GitConfig  *git.Configuration
 	Force      bool
+	File       string
 	Local      bool
 	Worktree   bool
 	System     bool
@@ -45,7 +47,17 @@ func (o *FilterOptions) Install() error {
 }
 
 func (o *FilterOptions) Uninstall() error {
-	return filterAttribute().Uninstall(o)
+	attrs := filterAttribute()
+	if err := attrs.Uninstall(o); err != nil {
+		return err
+	}
+	for k := range attrs.Properties {
+		name := fmt.Sprintf("%s.%s", attrs.Section, k)
+		if len(o.GitConfig.Find(name)) > 0 {
+			return errors.New(tr.Tr.Get("some filter configuration was not removed (found %s)", name))
+		}
+	}
+	return nil
 }
 
 func filterAttribute() *Attribute {
@@ -142,6 +154,8 @@ func (a *Attribute) set(gitConfig *git.Configuration, key, value string, upgrade
 		currentValue = gitConfig.FindWorktree(key)
 	} else if opt.System {
 		currentValue = gitConfig.FindSystem(key)
+	} else if opt.File != "" {
+		currentValue = gitConfig.FindFile(opt.File, key)
 	} else {
 		currentValue = gitConfig.FindGlobal(key)
 	}
@@ -154,6 +168,8 @@ func (a *Attribute) set(gitConfig *git.Configuration, key, value string, upgrade
 			_, err = gitConfig.SetWorktree(key, value)
 		} else if opt.System {
 			_, err = gitConfig.SetSystem(key, value)
+		} else if opt.File != "" {
+			_, err = gitConfig.SetFile(opt.File, key, value)
 		} else {
 			_, err = gitConfig.SetGlobal(key, value)
 		}
@@ -175,6 +191,8 @@ func (a *Attribute) Uninstall(opt *FilterOptions) error {
 		_, err = opt.GitConfig.UnsetWorktreeSection(a.Section)
 	} else if opt.System {
 		_, err = opt.GitConfig.UnsetSystemSection(a.Section)
+	} else if opt.File != "" {
+		_, err = opt.GitConfig.UnsetFileSection(opt.File, a.Section)
 	} else {
 		_, err = opt.GitConfig.UnsetGlobalSection(a.Section)
 	}

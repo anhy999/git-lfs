@@ -2,7 +2,6 @@ package tq
 
 import (
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -38,6 +37,7 @@ func (a *basicUploadAdapter) tempDir() string {
 func (a *basicUploadAdapter) WorkerStarting(workerNum int) (interface{}, error) {
 	return nil, nil
 }
+
 func (a *basicUploadAdapter) WorkerEnding(workerNum int, ctx interface{}) {
 }
 
@@ -126,7 +126,7 @@ func (a *basicUploadAdapter) DoTransfer(ctx interface{}, t *Transfer, cb Progres
 		}
 
 		if res.StatusCode == 429 {
-			retLaterErr := errors.NewRetriableLaterError(err, res.Header["Retry-After"][0])
+			retLaterErr := errors.NewRetriableLaterError(err, res.Header.Get("Retry-After"))
 			if retLaterErr != nil {
 				return retLaterErr
 			}
@@ -149,7 +149,7 @@ func (a *basicUploadAdapter) DoTransfer(ctx interface{}, t *Transfer, cb Progres
 		))
 	}
 
-	io.Copy(ioutil.Discard, res.Body)
+	io.Copy(io.Discard, res.Body)
 	res.Body.Close()
 
 	return verifyUpload(a.apiClient, a.remote, t)
@@ -202,6 +202,7 @@ func (s *startCallbackReader) Read(p []byte) (n int, err error) {
 	}
 	return s.ReadSeekCloser.Read(p)
 }
+
 func newStartCallbackReader(r lfsapi.ReadSeekCloser, cb func() error) *startCallbackReader {
 	return &startCallbackReader{
 		ReadSeekCloser: r,
@@ -209,7 +210,7 @@ func newStartCallbackReader(r lfsapi.ReadSeekCloser, cb func() error) *startCall
 	}
 }
 
-func configureBasicUploadAdapter(m *Manifest) {
+func configureBasicUploadAdapter(m *concreteManifest) {
 	m.RegisterNewAdapterFunc(BasicAdapterName, Upload, func(name string, dir Direction) Adapter {
 		switch dir {
 		case Upload:

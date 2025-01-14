@@ -24,10 +24,10 @@ var (
 
 // pushCommand pushes local objects to a Git LFS server.  It has four forms:
 //
-//   `<remote> <ref>...`
-//   `<remote> --stdin`              (reads refs from stdin)
-//   `<remote> --object-id <oid>...`
-//   `<remote> --object-id --stdin`  (reads oids from stdin)
+//	`<remote> <ref>...`
+//	`<remote> --stdin`              (reads refs from stdin)
+//	`<remote> --object-id <oid>...`
+//	`<remote> --object-id --stdin`  (reads oids from stdin)
 //
 // Remote must be a remote name, not a URL. With --stdin, values are newline
 // separated.
@@ -71,12 +71,18 @@ func pushCommand(cmd *cobra.Command, args []string) {
 	}
 
 	if pushObjectIDs {
-		if len(argList) < 1 {
+		// We allow no object IDs with `--stdin` to make scripting
+		// easier and avoid having to special-case this in scripts.
+		if !useStdin && len(argList) < 1 {
 			Print(tr.Tr.Get("At least one object ID must be supplied with --object-id"))
 			os.Exit(1)
 		}
 		uploadsWithObjectIDs(ctx, argList)
 	} else {
+		if !useStdin && !pushAll && len(argList) < 1 {
+			Print(tr.Tr.Get("At least one ref must be supplied without --all"))
+			os.Exit(1)
+		}
 		uploadsBetweenRefAndRemote(ctx, argList)
 	}
 }
@@ -151,6 +157,9 @@ func lfsPushRefs(refnames []string, pushAll bool) ([]*git.RefUpdate, error) {
 			refs[i] = git.NewRefUpdate(cfg.Git, cfg.PushRemote(), ref, nil)
 		} else {
 			ref := &git.Ref{Name: name, Type: git.RefTypeOther, Sha: name}
+			if _, err := git.ResolveRef(name); err != nil {
+				return nil, errors.New(tr.Tr.Get("Invalid ref argument: %v", name))
+			}
 			refs[i] = git.NewRefUpdate(cfg.Git, cfg.PushRemote(), ref, nil)
 		}
 	}

@@ -5,12 +5,14 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"io/ioutil"
 	"net/url"
+	"os"
 	"path/filepath"
 
 	"github.com/git-lfs/git-lfs/v3/config"
+	"github.com/git-lfs/git-lfs/v3/errors"
 	"github.com/git-lfs/git-lfs/v3/tools"
+	"github.com/git-lfs/git-lfs/v3/tr"
 	"github.com/rubyist/tracerx"
 )
 
@@ -45,14 +47,14 @@ func decryptPEMBlock(c *Client, block *pem.Block, path string, key []byte) ([]by
 	}
 	credWrapper := c.credHelperContext.GetCredentialHelper(nil, url)
 
-	credWrapper.Input["username"] = ""
+	credWrapper.Input["username"] = []string{""}
 
 	creds, err := credWrapper.CredentialHelper.Fill(credWrapper.Input)
 	if err != nil {
 		tracerx.Printf("Error filling credentials for %q: %v", fileurl, err)
 		return nil, err
 	}
-	pass := creds["password"]
+	pass := creds["password"][0]
 	decrypted, err := x509.DecryptPEMBlock(block, []byte(pass))
 	if err != nil {
 		credWrapper.CredentialHelper.Reject(creds)
@@ -68,36 +70,49 @@ func decryptPEMBlock(c *Client, block *pem.Block, path string, key []byte) ([]by
 
 // getClientCertForHost returns a client certificate for a specific host (which may
 // be "host:port" loaded from the gitconfig
-func getClientCertForHost(c *Client, host string) *tls.Certificate {
+func getClientCertForHost(c *Client, host string) (*tls.Certificate, error) {
 	hostSslKey, _ := c.uc.Get("http", fmt.Sprintf("https://%v/", host), "sslKey")
 	hostSslCert, _ := c.uc.Get("http", fmt.Sprintf("https://%v/", host), "sslCert")
 
-	cert, err := ioutil.ReadFile(hostSslCert)
+	hostSslKey, err := tools.ExpandPath(hostSslKey, false)
+	if err != nil {
+		return nil, errors.Wrapf(err, tr.Tr.Get("Error resolving key path %q", hostSslKey))
+	}
+
+	hostSslCert, err = tools.ExpandPath(hostSslCert, false)
+	if err != nil {
+		return nil, errors.Wrapf(err, tr.Tr.Get("Error resolving cert path %q", hostSslCert))
+	}
+
+	cert, err := os.ReadFile(hostSslCert)
 	if err != nil {
 		tracerx.Printf("Error reading client cert file %q: %v", hostSslCert, err)
-		return nil
+		return nil, errors.Wrapf(err, tr.Tr.Get("Error reading client cert file %q", hostSslCert))
 	}
-	key, err := ioutil.ReadFile(hostSslKey)
+	key, err := os.ReadFile(hostSslKey)
 	if err != nil {
 		tracerx.Printf("Error reading client key file %q: %v", hostSslKey, err)
-		return nil
+		return nil, errors.Wrapf(err, tr.Tr.Get("Error reading client key file %q", hostSslKey))
 	}
 
 	block, _ := pem.Decode(key)
+	if block == nil {
+		return nil, errors.New(tr.Tr.Get("Error decoding PEM block from %q", hostSslKey))
+	}
 	if x509.IsEncryptedPEMBlock(block) {
 		key, err = decryptPEMBlock(c, block, hostSslKey, key)
 		if err != nil {
 			tracerx.Printf("Unable to decrypt client key file %q: %v", hostSslKey, err)
-			return nil
+			return nil, errors.Wrapf(err, tr.Tr.Get("Error reading client key file %q (not a PKCS#1 file?)", hostSslKey))
 		}
 	}
 
 	certobj, err := tls.X509KeyPair(cert, key)
 	if err != nil {
 		tracerx.Printf("Error reading client cert/key %v", err)
-		return nil
+		return nil, errors.Wrapf(err, tr.Tr.Get("Error reading client cert/key"))
 	}
-	return &certobj
+	return &certobj, nil
 }
 
 // getRootCAsForHost returns a certificate pool for that specific host (which may
@@ -154,7 +169,7 @@ func appendCertsFromFilesInDir(pool *x509.CertPool, dir string) *x509.CertPool {
 	if errpath != nil {
 		tracerx.Printf("Error reading cert dir %q: %v", dirpath, errpath)
 	}
-	files, err := ioutil.ReadDir(dirpath)
+	files, err := os.ReadDir(dirpath)
 	if err != nil {
 		tracerx.Printf("Error reading cert dir %q: %v", dir, err)
 		return pool
@@ -170,7 +185,7 @@ func appendCertsFromFile(pool *x509.CertPool, filename string) *x509.CertPool {
 	if errfile != nil {
 		tracerx.Printf("Error reading cert dir %q: %v", filenamepath, errfile)
 	}
-	data, err := ioutil.ReadFile(filenamepath)
+	data, err := os.ReadFile(filenamepath)
 	if err != nil {
 		tracerx.Printf("Error reading cert file %q: %v", filename, err)
 		return pool

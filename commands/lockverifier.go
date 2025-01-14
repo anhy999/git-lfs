@@ -69,16 +69,16 @@ func (lv *lockVerifier) Verify(ref *git.Ref) {
 					Exit(tr.Tr.Get("error: Authentication error: %s", err))
 				}
 			} else {
-				Print(tr.Tr.Get("Remote %q does not support the Git LFS locking API. Consider disabling it with:", cfg.PushRemote()))
-				Print("  $ git config lfs.%s.locksverify false", lv.endpoint.Url)
+				Error(tr.Tr.Get("Remote %q does not support the Git LFS locking API. Consider disabling it with:", cfg.PushRemote()))
+				Error("  $ git config lfs.%s.locksverify false", lv.endpoint.Url)
 				if lv.verifyState == verifyStateEnabled {
 					ExitWithError(err)
 				}
 			}
 		}
 	} else if lv.verifyState == verifyStateUnknown {
-		Print(tr.Tr.Get("Locking support detected on remote %q. Consider enabling it with:", cfg.PushRemote()))
-		Print("  $ git config lfs.%s.locksverify true", lv.endpoint.Url)
+		Error(tr.Tr.Get("Locking support detected on remote %q. Consider enabling it with:", cfg.PushRemote()))
+		Error("  $ git config lfs.%s.locksverify true", lv.endpoint.Url)
 	}
 
 	lv.addLocks(ref, ours, lv.ourLocks)
@@ -151,7 +151,7 @@ func (lv *lockVerifier) newRefLocks(ref *git.Ref, l locking.Lock) *refLock {
 	}
 }
 
-func newLockVerifier(m *tq.Manifest) *lockVerifier {
+func newLockVerifier(m tq.Manifest) *lockVerifier {
 	lv := &lockVerifier{
 		endpoint:     getAPIClient().Endpoints.Endpoint("upload", cfg.PushRemote()),
 		verifiedRefs: make(map[string]bool),

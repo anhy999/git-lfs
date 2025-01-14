@@ -1,14 +1,18 @@
 package git
 
 import (
+	"errors"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
+	"strings"
 
 	"github.com/git-lfs/git-lfs/v3/filepathfilter"
 	"github.com/git-lfs/git-lfs/v3/git/gitattr"
 	"github.com/git-lfs/git-lfs/v3/tools"
+	"github.com/git-lfs/git-lfs/v3/tr"
 	"github.com/rubyist/tracerx"
 )
 
@@ -63,19 +67,36 @@ func GetRootAttributePaths(mp *gitattr.MacroProcessor, cfg Env) []AttributePath 
 // GetSystemAttributePaths behaves as GetAttributePaths, and loads information
 // only from the system gitattributes file, respecting the $PREFIX environment
 // variable.
-func GetSystemAttributePaths(mp *gitattr.MacroProcessor, env Env) []AttributePath {
-	prefix, _ := env.Get("PREFIX")
-	if len(prefix) == 0 {
-		prefix = string(filepath.Separator)
-	}
+func GetSystemAttributePaths(mp *gitattr.MacroProcessor, env Env) ([]AttributePath, error) {
+	var path string
+	if IsGitVersionAtLeast("2.42.0") {
+		cmd, err := gitNoLFS("var", "GIT_ATTR_SYSTEM")
+		if err != nil {
+			return nil, errors.New(tr.Tr.Get("failed to find `git var GIT_ATTR_SYSTEM`: %v", err))
+		}
+		out, err := cmd.Output()
+		if err != nil {
+			return nil, errors.New(tr.Tr.Get("failed to call `git var GIT_ATTR_SYSTEM`: %v", err))
+		}
+		paths := strings.Split(string(out), "\n")
+		if len(paths) == 0 {
+			return nil, nil
+		}
+		path = paths[0]
+	} else {
+		prefix, _ := env.Get("PREFIX")
+		if len(prefix) == 0 {
+			prefix = string(filepath.Separator)
+		}
 
-	path := filepath.Join(prefix, "etc", "gitattributes")
+		path = filepath.Join(prefix, "etc", "gitattributes")
+	}
 
 	if _, err := os.Stat(path); os.IsNotExist(err) {
-		return nil
+		return nil, nil
 	}
 
-	return attrPathsFromFile(mp, path, "", true)
+	return attrPathsFromFile(mp, path, "", true), nil
 }
 
 // GetAttributePaths returns a list of entries in .gitattributes which are
@@ -101,11 +122,17 @@ func attrPathsFromFile(mp *gitattr.MacroProcessor, path, workingDir string, read
 	return AttrPathsFromReader(mp, path, workingDir, attributes, readMacros)
 }
 
-func AttrPathsFromReader(mp *gitattr.MacroProcessor, path, workingDir string, rdr io.Reader, readMacros bool) []AttributePath {
+func AttrPathsFromReader(mp *gitattr.MacroProcessor, fpath, workingDir string, rdr io.Reader, readMacros bool) []AttributePath {
 	var paths []AttributePath
 
-	relfile, _ := filepath.Rel(workingDir, path)
-	reldir := filepath.Dir(relfile)
+	relfile, _ := filepath.Rel(workingDir, fpath)
+	// Go 1.20 now always returns ".\foo" instead of "foo" in filepath.Rel,
+	// but only on Windows.  Strip the extra dot here so our paths are
+	// always fully relative with no "." or ".." components.
+	reldir := filepath.ToSlash(tools.TrimCurrentPrefix(filepath.Dir(relfile)))
+	if reldir == "." {
+		reldir = ""
+	}
 	source := &AttributeSource{Path: relfile}
 
 	lines, eol, err := gitattr.ParseLines(rdr)
@@ -113,14 +140,14 @@ func AttrPathsFromReader(mp *gitattr.MacroProcessor, path, workingDir string, rd
 		return nil
 	}
 
-	lines = mp.ProcessLines(lines, readMacros)
+	patternLines := mp.ProcessLines(lines, readMacros)
 
-	for _, line := range lines {
+	for _, line := range patternLines {
 		lockable := false
 		tracked := false
 		hasFilter := false
 
-		for _, attr := range line.Attrs {
+		for _, attr := range line.Attrs() {
 			if attr.K == FilterAttrib {
 				hasFilter = true
 				tracked = attr.V == "lfs"
@@ -133,9 +160,9 @@ func AttrPathsFromReader(mp *gitattr.MacroProcessor, path, workingDir string, rd
 			continue
 		}
 
-		pattern := line.Pattern.String()
+		pattern := line.Pattern().String()
 		if len(reldir) > 0 {
-			pattern = filepath.Join(reldir, pattern)
+			pattern = path.Join(reldir, pattern)
 		}
 
 		paths = append(paths, AttributePath{

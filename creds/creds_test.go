@@ -1,11 +1,100 @@
 package creds
 
 import (
+	"bytes"
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
+
+func assertCredsLinesMatch(t *testing.T, expected []string, buf *bytes.Buffer) {
+	expected = append(expected, "")
+	actual := strings.SplitAfter(buf.String(), "\n")
+
+	slices.Sort(expected)
+	slices.Sort(actual)
+
+	assert.Equal(t, expected, actual)
+}
+
+func TestCredsBufferFormat(t *testing.T) {
+	creds := make(Creds)
+
+	expected := []string{"capability[]=authtype\n", "capability[]=state\n"}
+
+	buf, err := creds.buffer(true)
+	assert.NoError(t, err)
+	assertCredsLinesMatch(t, expected, buf)
+
+	creds["protocol"] = []string{"https"}
+	creds["host"] = []string{"example.com"}
+
+	expectedPrefix := strings.Join(expected, "")
+	expected = append(expected, "protocol=https\n", "host=example.com\n")
+
+	buf, err = creds.buffer(true)
+	assert.NoError(t, err)
+	assert.True(t, strings.HasPrefix(buf.String(), expectedPrefix))
+	assertCredsLinesMatch(t, expected, buf)
+
+	creds["wwwauth[]"] = []string{"Basic realm=test", "Negotiate"}
+
+	expected = append(expected, "wwwauth[]=Basic realm=test\n")
+	expected = append(expected, "wwwauth[]=Negotiate\n")
+
+	buf, err = creds.buffer(true)
+	assert.NoError(t, err)
+	assert.True(t, strings.HasPrefix(buf.String(), expectedPrefix))
+	assertCredsLinesMatch(t, expected, buf)
+}
+
+func TestCredsBufferProtect(t *testing.T) {
+	creds := make(Creds)
+
+	// Always disallow LF characters
+	creds["protocol"] = []string{"https"}
+	creds["host"] = []string{"one.example.com\nhost=two.example.com"}
+
+	buf, err := creds.buffer(false)
+	assert.Error(t, err)
+	assert.Nil(t, buf)
+
+	buf, err = creds.buffer(true)
+	assert.Error(t, err)
+	assert.Nil(t, buf)
+
+	// Disallow CR characters unless protocol protection disabled
+	creds["host"] = []string{"one.example.com\rhost=two.example.com"}
+
+	expected := []string{
+		"capability[]=authtype\n",
+		"capability[]=state\n",
+		"protocol=https\n",
+		"host=one.example.com\rhost=two.example.com\n",
+	}
+
+	buf, err = creds.buffer(false)
+	assert.NoError(t, err)
+	assertCredsLinesMatch(t, expected, buf)
+
+	buf, err = creds.buffer(true)
+	assert.Error(t, err)
+	assert.Nil(t, buf)
+
+	// Always disallow null bytes
+	creds["host"] = []string{"one.example.com\x00host=two.example.com"}
+
+	buf, err = creds.buffer(false)
+	assert.Error(t, err)
+	assert.Nil(t, buf)
+
+	buf, err = creds.buffer(true)
+	assert.Error(t, err)
+	assert.Nil(t, buf)
+}
 
 type testCredHelper struct {
 	fillErr    error
@@ -44,7 +133,7 @@ func TestCredHelperSetNoErrors(t *testing.T) {
 	helper1 := newTestCredHelper()
 	helper2 := newTestCredHelper()
 	helpers := NewCredentialHelpers([]CredentialHelper{cache, helper1, helper2})
-	creds := Creds{"protocol": "https", "host": "example.com"}
+	creds := Creds{"protocol": []string{"https"}, "host": []string{"example.com"}}
 
 	out, err := helpers.Fill(creds)
 	assert.Nil(t, err)
@@ -59,7 +148,12 @@ func TestCredHelperSetNoErrors(t *testing.T) {
 	assert.Equal(t, 2, len(helper1.fill))
 	assert.Equal(t, 0, len(helper2.fill))
 
-	credsWithPass := Creds{"protocol": "https", "host": "example.com", "username": "foo", "password": "bar"}
+	credsWithPass := Creds{
+		"protocol": []string{"https"},
+		"host":     []string{"example.com"},
+		"username": []string{"foo"},
+		"password": []string{"bar"},
+	}
 	assert.Nil(t, helpers.Approve(credsWithPass))
 	assert.Equal(t, 1, len(helper1.approve))
 	assert.Equal(t, 0, len(helper2.approve))
@@ -100,7 +194,7 @@ func TestCredHelperSetFillError(t *testing.T) {
 	helper1 := newTestCredHelper()
 	helper2 := newTestCredHelper()
 	helpers := NewCredentialHelpers([]CredentialHelper{cache, helper1, helper2})
-	creds := Creds{"protocol": "https", "host": "example.com"}
+	creds := Creds{"protocol": []string{"https"}, "host": []string{"example.com"}}
 
 	helper1.fillErr = errors.New("boom")
 	out, err := helpers.Fill(creds)
@@ -139,7 +233,7 @@ func TestCredHelperSetApproveError(t *testing.T) {
 	helper1 := newTestCredHelper()
 	helper2 := newTestCredHelper()
 	helpers := NewCredentialHelpers([]CredentialHelper{cache, helper1, helper2})
-	creds := Creds{"protocol": "https", "host": "example.com"}
+	creds := Creds{"protocol": []string{"https"}, "host": []string{"example.com"}}
 
 	approveErr := errors.New("boom")
 	helper1.approveErr = approveErr
@@ -170,7 +264,7 @@ func TestCredHelperSetFillAndApproveError(t *testing.T) {
 	helper1 := newTestCredHelper()
 	helper2 := newTestCredHelper()
 	helpers := NewCredentialHelpers([]CredentialHelper{cache, helper1, helper2})
-	creds := Creds{"protocol": "https", "host": "example.com"}
+	creds := Creds{"protocol": []string{"https"}, "host": []string{"example.com"}}
 
 	credErr := errors.New("boom")
 	helper1.fillErr = credErr
@@ -200,7 +294,7 @@ func TestCredHelperSetRejectError(t *testing.T) {
 	helper1 := newTestCredHelper()
 	helper2 := newTestCredHelper()
 	helpers := NewCredentialHelpers([]CredentialHelper{cache, helper1, helper2})
-	creds := Creds{"protocol": "https", "host": "example.com"}
+	creds := Creds{"protocol": []string{"https"}, "host": []string{"example.com"}}
 
 	rejectErr := errors.New("boom")
 	helper1.rejectErr = rejectErr
@@ -238,7 +332,7 @@ func TestCredHelperSetAllFillErrors(t *testing.T) {
 	helper1 := newTestCredHelper()
 	helper2 := newTestCredHelper()
 	helpers := NewCredentialHelpers([]CredentialHelper{cache, helper1, helper2})
-	creds := Creds{"protocol": "https", "host": "example.com"}
+	creds := Creds{"protocol": []string{"https"}, "host": []string{"example.com"}}
 
 	helper1.fillErr = errors.New("boom 1")
 	helper2.fillErr = errors.New("boom 2")

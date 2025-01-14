@@ -5,7 +5,6 @@ package tools
 
 import (
 	"io"
-	"io/ioutil"
 	"os"
 
 	"golang.org/x/sys/unix"
@@ -16,17 +15,23 @@ import (
 //
 // If check failed (e.g. directory is read-only), returns err.
 func CheckCloneFileSupported(dir string) (supported bool, err error) {
-	src, err := ioutil.TempFile(dir, "src")
+	src, err := os.CreateTemp(dir, "src")
 	if err != nil {
 		return false, err
 	}
-	defer os.Remove(src.Name())
+	defer func() {
+		src.Close()
+		os.Remove(src.Name())
+	}()
 
-	dst, err := ioutil.TempFile(dir, "dst")
+	dst, err := os.CreateTemp(dir, "dst")
 	if err != nil {
 		return false, err
 	}
-	defer os.Remove(dst.Name())
+	defer func() {
+		dst.Close()
+		os.Remove(dst.Name())
+	}()
 
 	if ok, err := CloneFile(dst, src); err != nil {
 		return false, err
@@ -52,10 +57,12 @@ func CloneFileByPath(dst, src string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	defer srcFile.Close()
 	dstFile, err := os.Create(dst) //truncating, it if it already exists.
 	if err != nil {
 		return false, err
 	}
+	defer dstFile.Close()
 
 	return CloneFile(dstFile, srcFile)
 }

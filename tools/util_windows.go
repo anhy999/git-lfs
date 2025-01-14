@@ -5,7 +5,6 @@ package tools
 
 import (
 	"io"
-	"io/ioutil"
 	"os"
 	"unsafe"
 
@@ -39,11 +38,14 @@ type duplicateExtentsData struct {
 //
 // If check failed (e.g. directory is read-only), returns err.
 func CheckCloneFileSupported(dir string) (supported bool, err error) {
-	src, err := ioutil.TempFile(dir, "src")
+	src, err := os.CreateTemp(dir, "src")
 	if err != nil {
 		return false, err
 	}
-	defer os.Remove(src.Name())
+	defer func() {
+		src.Close()
+		os.Remove(src.Name())
+	}()
 
 	// Make src file not empty.
 	// Because `FSCTL_DUPLICATE_EXTENTS_TO_FILE` on empty file is always success even filesystem don't support it.
@@ -52,11 +54,14 @@ func CheckCloneFileSupported(dir string) (supported bool, err error) {
 		return false, err
 	}
 
-	dst, err := ioutil.TempFile(dir, "dst")
+	dst, err := os.CreateTemp(dir, "dst")
 	if err != nil {
 		return false, err
 	}
-	defer os.Remove(dst.Name())
+	defer func() {
+		dst.Close()
+		os.Remove(dst.Name())
+	}()
 
 	return CloneFile(dst, src)
 }
@@ -66,11 +71,13 @@ func CloneFileByPath(dst, src string) (success bool, err error) {
 	if err != nil {
 		return
 	}
+	defer dstFile.Close()
 
 	srcFile, err := os.Open(src)
 	if err != nil {
 		return
 	}
+	defer srcFile.Close()
 
 	return CloneFile(dstFile, srcFile)
 }

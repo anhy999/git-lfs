@@ -3,7 +3,6 @@ package githistory
 import (
 	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 	"sync"
@@ -139,7 +138,6 @@ type TreePreCallbackFn func(path string, t *gitobj.Tree) error
 // written to the object database instead of one generated from calling BlobFn
 // on all of the tree entries.
 //
-//
 // TreeCallbackFn can be nil, and will therefore exhibit behavior equivalent to
 // only calling the BlobFn on existing tree entries.
 //
@@ -157,14 +155,6 @@ var (
 		return func(r *Rewriter) {
 			r.filter = filter
 		}
-	}
-
-	// WithLoggerTo logs updates caused by the *git/githistory.Rewriter to
-	// the given io.Writer "sink".
-	WithLoggerTo = func(sink io.Writer, forceProgress bool) rewriterOption {
-		return WithLogger(tasklog.NewLogger(sink,
-			tasklog.ForceProgress(forceProgress),
-		))
 	}
 
 	// WithLogger logs updates caused by the *git/githistory.Rewriter to the
@@ -218,6 +208,7 @@ func (r *Rewriter) Rewrite(opt *RewriteOptions) ([]byte, error) {
 	} else {
 		perc = r.l.Percentage(fmt.Sprintf("migrate: %s", tr.Tr.Get("Examining commits")), uint64(len(commits)))
 	}
+	defer perc.Complete()
 
 	var vPerc *tasklog.PercentageTask
 	if opt.Verbose {

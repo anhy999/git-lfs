@@ -3,7 +3,6 @@ package commands
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -21,15 +20,8 @@ import (
 )
 
 func uploadForRefUpdates(ctx *uploadContext, updates []*git.RefUpdate, pushAll bool) error {
-	gitscanner, err := ctx.buildGitScanner()
-	if err != nil {
-		return err
-	}
-
-	defer func() {
-		gitscanner.Close()
-		ctx.ReportErrors()
-	}()
+	gitscanner := ctx.buildGitScanner()
+	defer ctx.ReportErrors()
 
 	verifyLocksForUpdates(ctx.lockVerifier, updates)
 	exclude := make([]string, 0, len(updates))
@@ -72,7 +64,7 @@ func uploadRangeOrAll(g *lfs.GitScanner, ctx *uploadContext, q *tq.TransferQueue
 type uploadContext struct {
 	Remote       string
 	DryRun       bool
-	Manifest     *tq.Manifest
+	Manifest     tq.Manifest
 	uploadedOids tools.StringSet
 	gitfilter    *lfs.GitFilter
 
@@ -116,7 +108,7 @@ func newUploadContext(dryRun bool) *uploadContext {
 
 	var sink io.Writer = os.Stdout
 	if dryRun {
-		sink = ioutil.Discard
+		sink = io.Discard
 	}
 
 	ctx.logger = tasklog.NewLogger(sink,
@@ -132,6 +124,7 @@ func (c *uploadContext) NewQueue(options ...tq.Option) *tq.TransferQueue {
 	return tq.NewTransferQueue(tq.Upload, c.Manifest, c.Remote, append(options,
 		tq.DryRun(c.DryRun),
 		tq.WithProgress(c.meter),
+		tq.WithBatchSize(cfg.TransferBatchSize()),
 	)...)
 }
 
@@ -153,11 +146,8 @@ func (c *uploadContext) addScannerError(err error) {
 	}
 }
 
-func (c *uploadContext) buildGitScanner() (*lfs.GitScanner, error) {
-	gitscanner := lfs.NewGitScanner(cfg, nil)
-	gitscanner.FoundLockable = func(n string) { c.lockVerifier.LockedByThem(n) }
-	gitscanner.PotentialLockables = c.lockVerifier
-	return gitscanner, gitscanner.RemoteForPush(c.Remote)
+func (c *uploadContext) buildGitScanner() *lfs.GitScanner {
+	return lfs.NewGitScannerForPush(cfg, c.Remote, func(n string) { c.lockVerifier.LockedByThem(n) }, c.lockVerifier)
 }
 
 func (c *uploadContext) gitScannerCallback(tqueue *tq.TransferQueue) func(*lfs.WrappedPointer, error) {
@@ -190,8 +180,8 @@ func (c *uploadContext) prepareUpload(unfiltered ...*lfs.WrappedPointer) []*lfs.
 	// scanner
 	uniqOids := tools.NewStringSet()
 
-	// separate out objects that _should_ be uploaded, but don't exist in
-	// .git/lfs/objects. Those will skipped if the server already has them.
+	// Skip any objects which we've seen or already uploaded, as well
+	// as any which are locked by other users.
 	for _, p := range unfiltered {
 		// object already uploaded in this process, or we've already
 		// seen this OID (see above), skip!
@@ -358,6 +348,8 @@ func (c *uploadContext) uploadTransfer(p *lfs.WrappedPointer) (*tq.Transfer, err
 		return nil, errors.Wrap(err, tr.Tr.Get("Error uploading file %s (%s)", filename, oid))
 	}
 
+	// Skip the object if its corresponding file does not exist in
+	// .git/lfs/objects/.
 	if len(filename) > 0 {
 		if missing, err = c.ensureFile(filename, localMediaPath, oid); err != nil && !errors.IsCleanPointerError(err) {
 			return nil, err

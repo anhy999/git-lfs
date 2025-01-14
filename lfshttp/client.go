@@ -209,6 +209,12 @@ func (c *Client) sshResolveWithRetries(e Endpoint, method string) (*sshAuthRespo
 	var sshRes sshAuthResponse
 	var err error
 
+	uc := config.NewURLConfig(c.gitEnv)
+	if val, ok := uc.Get("lfs", e.OriginalUrl, "sshtransfer"); ok && val != "negotiate" && val != "never" {
+		tracerx.Printf("skipping SSH-HTTPS hybrid protocol connection by request")
+		return nil, errors.New("git-lfs-authenticate has been disabled by request")
+	}
+
 	requests := tools.MaxInt(0, c.sshTries) + 1
 	for i := 0; i < requests; i++ {
 		sshRes, err = c.SSH.Resolve(e, method)
@@ -464,7 +470,10 @@ func (c *Client) Transport(u *url.URL, access creds.AccessMode) (http.RoundTripp
 
 	if isClientCertEnabledForHost(c, host) {
 		tracerx.Printf("http: client cert for %s", host)
-		cert := getClientCertForHost(c, host)
+		cert, err := getClientCertForHost(c, host)
+		if err != nil {
+			return nil, err
+		}
 		if cert != nil {
 			tr.TLSClientConfig.Certificates = []tls.Certificate{*cert}
 			tr.TLSClientConfig.BuildNameToCertificate()

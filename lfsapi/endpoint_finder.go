@@ -1,10 +1,12 @@
 package lfsapi
 
 import (
+	"bufio"
 	"fmt"
 	"net/url"
 	"os"
 	"path"
+	"regexp"
 	"strings"
 	"sync"
 
@@ -35,10 +37,12 @@ type endpointGitFinder struct {
 	gitConfig   *git.Configuration
 	gitEnv      config.Environment
 	gitProtocol string
+	gitDir      string
 
 	aliasMu     sync.Mutex
 	aliases     map[string]string
 	pushAliases map[string]string
+	remoteList  []string
 
 	accessMu  sync.Mutex
 	urlAccess map[string]creds.AccessMode
@@ -50,14 +54,26 @@ func NewEndpointFinder(ctx lfshttp.Context) EndpointFinder {
 		ctx = lfshttp.NewContext(nil, nil, nil)
 	}
 
+	var gitDir string
+	cfg := ctx.GitConfig()
+	if cfg != nil && cfg.GitDir != "" {
+		gitDir = cfg.GitDir
+	} else if dir, err := git.GitDir(); err == nil {
+		gitDir = dir
+	}
+
 	e := &endpointGitFinder{
 		gitConfig:   ctx.GitConfig(),
 		gitEnv:      ctx.GitEnv(),
 		gitProtocol: "https",
+		gitDir:      gitDir,
 		aliases:     make(map[string]string),
 		pushAliases: make(map[string]string),
 		urlAccess:   make(map[string]creds.AccessMode),
 	}
+
+	remotes, _ := git.RemoteList()
+	e.remoteList = remotes
 
 	e.urlConfig = config.NewURLConfig(e.gitEnv)
 	if v, ok := e.gitEnv.Get("lfs.gitprotocol"); ok {
@@ -117,12 +133,58 @@ func (e *endpointGitFinder) RemoteEndpoint(operation, remote string) lfshttp.End
 		return e.NewEndpoint(operation, url)
 	}
 
-	// finally fall back on git remote url (also supports pushurl)
+	// fall back on git remote url (also supports pushurl)
 	if url := e.GitRemoteURL(remote, operation == "upload"); url != "" {
 		return e.NewEndpointFromCloneURL(operation, url)
 	}
 
+	// Finally, fall back on .git/FETCH_HEAD but only if it exists and no specific remote was requested
+	// We can't know which remote FETCH_HEAD is pointing to
+	if e.gitDir != "" && remote == defaultRemote {
+		url, err := parseFetchHead(strings.Join([]string{e.gitDir, "FETCH_HEAD"}, "/"))
+		if err == nil {
+			endpoint := e.NewEndpointFromCloneURL("download", url)
+			return endpoint
+		} else {
+			tracerx.Printf("failed parsing FETCH_HEAD: %s", err)
+		}
+	}
+
 	return lfshttp.Endpoint{}
+}
+
+func parseFetchHead(filePath string) (string, error) {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	if scanner.Scan() {
+		line := scanner.Text()
+		return ExtractRemoteUrl(line)
+	}
+
+	return "", fmt.Errorf("Failed to read content from %s", filePath)
+}
+
+func ExtractRemoteUrl(line string) (string, error) {
+	// see https://regex101.com/r/lYla7c/1
+	re := regexp.MustCompile(`^[a-f0-9]{40,64}\t(not-for-merge)?\t(tag |branch |)'.*' of (?P<url>[\/\.\-\:\_a-zA-Z0-9]+)$`)
+
+	match := re.FindStringSubmatch(line)
+
+	for i, name := range re.SubexpNames() {
+		if name == "url" {
+			if len(match) < i {
+				break
+			}
+			return strings.TrimSpace(match[i]), nil
+		}
+	}
+
+	return "", fmt.Errorf("failed to extract remote URL from \"%s\"", line)
 }
 
 func (e *endpointGitFinder) GitRemoteURL(remote string, forpush bool) string {
@@ -138,7 +200,7 @@ func (e *endpointGitFinder) GitRemoteURL(remote string, forpush bool) string {
 		}
 	}
 
-	if err := git.ValidateRemote(remote); err == nil {
+	if err := git.ValidateRemoteFromList(e.remoteList, remote); err == nil {
 		return remote
 	}
 
@@ -151,8 +213,8 @@ func (e *endpointGitFinder) NewEndpointFromCloneURL(operation, rawurl string) lf
 		return ep
 	}
 
-	if strings.HasSuffix(rawurl, "/") {
-		ep.Url = rawurl[0 : len(rawurl)-1]
+	if strings.HasSuffix(ep.Url, "/") {
+		ep.Url = ep.Url[0 : len(ep.Url)-1]
 	}
 
 	if strings.HasPrefix(ep.Url, "file://") {

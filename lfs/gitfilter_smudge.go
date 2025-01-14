@@ -15,18 +15,24 @@ import (
 	"github.com/rubyist/tracerx"
 )
 
-func (f *GitFilter) SmudgeToFile(filename string, ptr *Pointer, download bool, manifest *tq.Manifest, cb tools.CopyCallback) error {
+func (f *GitFilter) SmudgeToFile(filename string, ptr *Pointer, download bool, manifest tq.Manifest, cb tools.CopyCallback) error {
 	tools.MkdirAll(filepath.Dir(filename), f.cfg)
 
-	if stat, _ := os.Stat(filename); stat != nil && stat.Mode()&0200 == 0 {
-		if err := os.Chmod(filename, stat.Mode()|0200); err != nil {
-			return errors.Wrap(err,
-				tr.Tr.Get("Could not restore write permission"))
+	if stat, _ := os.Stat(filename); stat != nil {
+		if ptr.Size == 0 && stat.Size() == 0 {
+			return nil
 		}
 
-		// When we're done, return the file back to its normal
-		// permission bits.
-		defer os.Chmod(filename, stat.Mode())
+		if stat.Mode()&0200 == 0 {
+			if err := os.Chmod(filename, stat.Mode()|0200); err != nil {
+				return errors.Wrap(err,
+					tr.Tr.Get("Could not restore write permission"))
+			}
+
+			// When we're done, return the file back to its normal
+			// permission bits.
+			defer os.Chmod(filename, stat.Mode())
+		}
 	}
 
 	abs, err := filepath.Abs(filename)
@@ -52,7 +58,7 @@ func (f *GitFilter) SmudgeToFile(filename string, ptr *Pointer, download bool, m
 	return nil
 }
 
-func (f *GitFilter) Smudge(writer io.Writer, ptr *Pointer, workingfile string, download bool, manifest *tq.Manifest, cb tools.CopyCallback) (int64, error) {
+func (f *GitFilter) Smudge(writer io.Writer, ptr *Pointer, workingfile string, download bool, manifest tq.Manifest, cb tools.CopyCallback) (int64, error) {
 	mediafile, err := f.ObjectPath(ptr.Oid)
 	if err != nil {
 		return 0, err
@@ -99,7 +105,7 @@ func (f *GitFilter) Smudge(writer io.Writer, ptr *Pointer, workingfile string, d
 	return n, nil
 }
 
-func (f *GitFilter) downloadFile(writer io.Writer, ptr *Pointer, workingfile, mediafile string, manifest *tq.Manifest, cb tools.CopyCallback) (int64, error) {
+func (f *GitFilter) downloadFile(writer io.Writer, ptr *Pointer, workingfile, mediafile string, manifest tq.Manifest, cb tools.CopyCallback) (int64, error) {
 	fmt.Fprintln(os.Stderr, tr.Tr.Get("Downloading %s (%s)", workingfile, humanize.FormatBytes(uint64(ptr.Size))))
 
 	// NOTE: if given, "cb" is a tools.CopyCallback which writes updates
@@ -111,6 +117,7 @@ func (f *GitFilter) downloadFile(writer io.Writer, ptr *Pointer, workingfile, me
 	q := tq.NewTransferQueue(tq.Download, manifest, f.cfg.Remote(),
 		tq.WithProgressCallback(cb),
 		tq.RemoteRef(f.RemoteRef()),
+		tq.WithBatchSize(f.cfg.TransferBatchSize()),
 	)
 	q.Add(filepath.Base(workingfile), mediafile, ptr.Oid, ptr.Size, false, nil)
 	q.Wait()
@@ -131,7 +138,7 @@ func (f *GitFilter) downloadFile(writer io.Writer, ptr *Pointer, workingfile, me
 	return f.readLocalFile(writer, ptr, mediafile, workingfile, nil)
 }
 
-func (f *GitFilter) downloadFileFallBack(writer io.Writer, ptr *Pointer, workingfile, mediafile string, manifest *tq.Manifest, cb tools.CopyCallback) (int64, error) {
+func (f *GitFilter) downloadFileFallBack(writer io.Writer, ptr *Pointer, workingfile, mediafile string, manifest tq.Manifest, cb tools.CopyCallback) (int64, error) {
 	// Attempt to find the LFS objects in all currently registered remotes.
 	// When a valid remote is found, this remote is taken persistent for
 	// future attempts within downloadFile(). In best case, the ordinary
@@ -142,6 +149,7 @@ func (f *GitFilter) downloadFileFallBack(writer io.Writer, ptr *Pointer, working
 		q := tq.NewTransferQueue(tq.Download, manifest, remote,
 			tq.WithProgressCallback(cb),
 			tq.RemoteRef(f.RemoteRef()),
+			tq.WithBatchSize(f.cfg.TransferBatchSize()),
 		)
 		q.Add(filepath.Base(workingfile), mediafile, ptr.Oid, ptr.Size, false, nil)
 		q.Wait()

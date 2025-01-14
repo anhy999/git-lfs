@@ -3,6 +3,7 @@ package commands
 import (
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/git-lfs/git-lfs/v3/errors"
@@ -134,7 +135,6 @@ func lsFilesCommand(cmd *cobra.Command, args []string) {
 
 		seen[p.Name] = struct{}{}
 	})
-	defer gitscanner.Close()
 
 	includeArg, excludeArg := getIncludeExcludeArgs(cmd)
 	gitscanner.Filter = buildFilepathFilter(cfg, includeArg, excludeArg, false)
@@ -145,7 +145,7 @@ func lsFilesCommand(cmd *cobra.Command, args []string) {
 		//
 		// Do so to avoid showing "mixed" results, e.g., ls-files output
 		// from a specific historical revision, and the index.
-		if err := gitscanner.ScanIndex(ref, nil); err != nil {
+		if err := gitscanner.ScanIndex(ref, "", nil); err != nil {
 			Exit(tr.Tr.Get("Could not scan for Git LFS index: %s", err))
 		}
 	}
@@ -182,7 +182,7 @@ func lsFilesCommand(cmd *cobra.Command, args []string) {
 // Returns true if a pointer appears to be properly smudge on checkout
 func fileExistsOfSize(p *lfs.WrappedPointer) bool {
 	path := cfg.Filesystem().DecodePathname(p.Name)
-	info, err := os.Stat(path)
+	info, err := os.Stat(filepath.Join(cfg.LocalWorkingDir(), path))
 	return err == nil && info.Size() == p.Size
 }
 

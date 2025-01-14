@@ -26,7 +26,7 @@ begin_test "migrate import (default branch)"
   feature="$(git rev-parse refs/heads/my-feature)"
 
   main_attrs="$(git cat-file -p "$main:.gitattributes")"
-  [ ! $(git cat-file -p "$feature:.gitattributes") ]
+  [ -z "$(git cat-file -p "$feature:.gitattributes")" ]
 
   echo "$main_attrs" | grep -q "*.md filter=lfs diff=lfs merge=lfs"
   echo "$main_attrs" | grep -q "*.txt filter=lfs diff=lfs merge=lfs"
@@ -103,7 +103,7 @@ begin_test "migrate import (default branch with filter)"
   feature="$(git rev-parse refs/heads/my-feature)"
 
   main_attrs="$(git cat-file -p "$main:.gitattributes")"
-  [ ! $(git cat-file -p "$feature:.gitattributes") ]
+  [ -z "$(git cat-file -p "$feature:.gitattributes")" ]
 
   echo "$main_attrs" | grep -q "*.md filter=lfs diff=lfs merge=lfs"
   echo "$main_attrs" | grep -vq "*.txt filter=lfs diff=lfs merge=lfs"
@@ -167,7 +167,7 @@ begin_test "migrate import (default branch, exclude remote refs)"
   remote="$(git rev-parse refs/remotes/origin/main)"
 
   main_attrs="$(git cat-file -p "$main:.gitattributes")"
-  [ ! $(git cat-file -p "$remote:.gitattributes") ]
+  [ -z "$(git cat-file -p "$remote:.gitattributes")" ]
 
   echo "$main_attrs" | grep -q "*.md filter=lfs diff=lfs merge=lfs"
   echo "$main_attrs" | grep -vq "*.txt filter=lfs diff=lfs merge=lfs"
@@ -206,7 +206,7 @@ begin_test "migrate import (given branch, exclude remote refs)"
   remote="$(git rev-parse refs/remotes/origin/main)"
 
   main_attrs="$(git cat-file -p "$main:.gitattributes")"
-  [ ! $(git cat-file -p "$remote:.gitattributes") ]
+  [ -z "$(git cat-file -p "$remote:.gitattributes")" ]
   feature_attrs="$(git cat-file -p "$feature:.gitattributes")"
 
   echo "$main_attrs" | grep -q "*.md filter=lfs diff=lfs merge=lfs"
@@ -322,8 +322,8 @@ begin_test "migrate import (include/exclude ref)"
   feature="$(git rev-parse refs/heads/my-feature)"
   remote="$(git rev-parse refs/remotes/origin/main)"
 
-  [ ! $(git cat-file -p "$main:.gitattributes") ]
-  [ ! $(git cat-file -p "$remote:.gitattributes") ]
+  [ -z "$(git cat-file -p "$main:.gitattributes")" ]
+  [ -z "$(git cat-file -p "$remote:.gitattributes")" ]
   feature_attrs="$(git cat-file -p "$feature:.gitattributes")"
 
   echo "$feature_attrs" | grep -q "*.md filter=lfs diff=lfs merge=lfs"
@@ -360,8 +360,8 @@ begin_test "migrate import (include/exclude ref args)"
   feature="$(git rev-parse refs/heads/my-feature)"
   remote="$(git rev-parse refs/remotes/origin/main)"
 
-  [ ! $(git cat-file -p "$main:.gitattributes") ]
-  [ ! $(git cat-file -p "$remote:.gitattributes") ]
+  [ -z "$(git cat-file -p "$main:.gitattributes")" ]
+  [ -z "$(git cat-file -p "$remote:.gitattributes")" ]
   feature_attrs="$(git cat-file -p "$feature:.gitattributes")"
 
   echo "$feature_attrs" | grep -q "*.md filter=lfs diff=lfs merge=lfs"
@@ -400,12 +400,23 @@ begin_test "migrate import (include/exclude ref with filter)"
   feature="$(git rev-parse refs/heads/my-feature)"
   remote="$(git rev-parse refs/remotes/origin/main)"
 
-  [ ! $(git cat-file -p "$main:.gitattributes") ]
-  [ ! $(git cat-file -p "$remote:.gitattributes") ]
+  [ -z "$(git cat-file -p "$main:.gitattributes")" ]
+  [ -z "$(git cat-file -p "$remote:.gitattributes")" ]
   feature_attrs="$(git cat-file -p "$feature:.gitattributes")"
 
   echo "$feature_attrs" | grep -vq "*.md filter=lfs diff=lfs merge=lfs"
   echo "$feature_attrs" | grep -q "*.txt filter=lfs diff=lfs merge=lfs"
+)
+end_test
+
+begin_test "migrate import (invalid ref)"
+(
+  set -e
+  remove_and_create_local_repo "migrate-import-invalid-ref"
+  git commit --allow-empty -m "initial commit"
+
+  git lfs migrate import --yes jibberish >migrate.log 2>&1 && exit 1
+  grep "can't resolve ref" migrate.log
 )
 end_test
 
@@ -846,7 +857,7 @@ begin_test "migrate import (--everything with tag pointing to tag)"
   assert_pointer "refs/heads/my-feature" "a.md" "$md_feature_oid" "30"
 
   git tag --points-at refs/tags/abc | grep -q def
-  ! git tag --points-at refs/tags/def | grep -q abc
+  git tag --points-at refs/tags/def | grep -q abc && exit 1
 
   assert_local_object "$md_main_oid" "140"
   assert_local_object "$md_feature_oid" "30"
@@ -924,7 +935,8 @@ begin_test "migrate import (--object-map)"
 
   setup_multiple_local_branches
 
-  output_dir=$(mktemp -d)
+  output_dir="$GIT_LFS_TEST_DIR/import-object-map-$(lfstest-genrandom --base64url 32)"
+  mkdir -p "$output_dir"
 
   git log --all --pretty='format:%H' > "${output_dir}/old_sha.txt"
   git lfs migrate import --everything --object-map "${output_dir}/object-map.txt"

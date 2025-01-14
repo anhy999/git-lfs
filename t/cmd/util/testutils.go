@@ -11,7 +11,6 @@ package util
 import (
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -183,6 +182,14 @@ func NewRepo(callback RepoCallback) *Repo {
 	})
 }
 
+// NewBareRepo creates a new bare git repo in a new temp dir
+// Note that the repository's path does not end in ".git".
+func NewBareRepo(callback RepoCallback) *Repo {
+	return newRepo(callback, &RepoCreateSettings{
+		RepoType: RepoTypeBare,
+	})
+}
+
 // newRepo creates a new git repo in a new temp dir with more control over settings
 func newRepo(callback RepoCallback, settings *RepoCreateSettings) *Repo {
 	ret := &Repo{
@@ -191,7 +198,7 @@ func newRepo(callback RepoCallback, settings *RepoCreateSettings) *Repo {
 		callback: callback,
 	}
 
-	path, err := ioutil.TempDir("", "lfsRepo")
+	path, err := os.MkdirTemp("", "lfsRepo")
 	if err != nil {
 		callback.Fatalf("Can't create temp dir for git repo: %v", err)
 	}
@@ -202,7 +209,7 @@ func newRepo(callback RepoCallback, settings *RepoCreateSettings) *Repo {
 		args = append(args, "--bare")
 		ret.GitDir = ret.Path
 	case RepoTypeSeparateDir:
-		gitdir, err := ioutil.TempDir("", "lfstestgitdir")
+		gitdir, err := os.MkdirTemp("", "lfstestgitdir")
 		if err != nil {
 			ret.Cleanup()
 			callback.Fatalf("Can't create temp dir for git repo: %v", err)
@@ -509,6 +516,13 @@ type RefsByName []*git.Ref
 func (a RefsByName) Len() int           { return len(a) }
 func (a RefsByName) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
 func (a RefsByName) Less(i, j int) bool { return a[i].Name < a[j].Name }
+
+// WorktreesByName implements sort.Interface for []*git.Worktree based on dir
+type WorktreesByName []*git.Worktree
+
+func (a WorktreesByName) Len() int           { return len(a) }
+func (a WorktreesByName) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a WorktreesByName) Less(i, j int) bool { return a[i].Dir < a[j].Dir }
 
 // WrappedPointersByOid implements sort.Interface for []*lfs.WrappedPointer based on oid
 type WrappedPointersByOid []*lfs.WrappedPointer

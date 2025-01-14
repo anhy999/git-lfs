@@ -2,7 +2,7 @@ package git
 
 import (
 	"bufio"
-	"io/ioutil"
+	"io"
 	"path"
 	"strings"
 
@@ -27,6 +27,10 @@ func NewLsFiles(workingDir string, standardExclude bool, untracked bool) (*LsFil
 		"ls-files",
 		"-z", // Use a NUL separator. This also disables the escaping of special characters.
 		"--cached",
+	}
+
+	if IsGitVersionAtLeast("2.35.0") {
+		args = append(args, "--sparse")
 	}
 
 	if standardExclude {
@@ -70,7 +74,7 @@ func NewLsFiles(workingDir string, standardExclude bool, untracked bool) (*LsFil
 	// the subprocess to block.
 	errorMessages := make(chan []byte)
 	go func() {
-		msg, _ := ioutil.ReadAll(stderr)
+		msg, _ := io.ReadAll(stderr)
 		errorMessages <- msg
 	}()
 

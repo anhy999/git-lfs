@@ -17,6 +17,7 @@ type Endpoint struct {
 	Url         string
 	SSHMetadata ssh.SSHMetadata
 	Operation   string
+	OriginalUrl string
 }
 
 func endpointOperation(e Endpoint, method string) string {
@@ -43,6 +44,8 @@ func EndpointFromSshUrl(u *url.URL) Endpoint {
 		return endpoint
 	}
 
+	endpoint.OriginalUrl = u.String()
+
 	host := match[1]
 	if u.User != nil && u.User.Username() != "" {
 		endpoint.SSHMetadata.UserAndHost = fmt.Sprintf("%s@%s", u.User.Username(), host)
@@ -65,9 +68,8 @@ func EndpointFromSshUrl(u *url.URL) Endpoint {
 
 // EndpointFromBareSshUrl constructs a new endpoint from a bare SSH URL:
 //
-//   user@host.com:path/to/repo.git or
-//   [user@host.com:port]:path/to/repo.git
-//
+//	user@host.com:path/to/repo.git or
+//	[user@host.com:port]:path/to/repo.git
 func EndpointFromBareSshUrl(rawurl string) Endpoint {
 	parts := strings.Split(rawurl, ":")
 	partsLen := len(parts)
@@ -101,15 +103,16 @@ func EndpointFromBareSshUrl(rawurl string) Endpoint {
 // Construct a new endpoint from a HTTP URL
 func EndpointFromHttpUrl(u *url.URL) Endpoint {
 	// just pass this straight through
-	return Endpoint{Url: u.String()}
+	return Endpoint{Url: u.String(), OriginalUrl: u.String()}
 }
 
 func EndpointFromLocalPath(path string) Endpoint {
-	return Endpoint{Url: git.RewriteLocalPathAsURL(path)}
+	url := git.RewriteLocalPathAsURL(path)
+	return Endpoint{Url: url, OriginalUrl: url}
 }
 
 // Construct a new endpoint from a file URL
 func EndpointFromFileUrl(u *url.URL) Endpoint {
 	// just pass this straight through
-	return Endpoint{Url: u.String()}
+	return Endpoint{Url: u.String(), OriginalUrl: u.String()}
 }

@@ -2,10 +2,10 @@ package commands
 
 import (
 	"bufio"
-	"io/ioutil"
 	"os"
 	"strings"
 
+	"github.com/git-lfs/git-lfs/v3/tools"
 	"github.com/git-lfs/git-lfs/v3/tr"
 	"github.com/spf13/cobra"
 )
@@ -22,7 +22,7 @@ func untrackCommand(cmd *cobra.Command, args []string) {
 		return
 	}
 
-	data, err := ioutil.ReadFile(".gitattributes")
+	data, err := os.ReadFile(".gitattributes")
 	if err != nil {
 		return
 	}
@@ -57,9 +57,9 @@ func untrackCommand(cmd *cobra.Command, args []string) {
 }
 
 func removePath(path string, args []string) bool {
-	withoutCurrentDir := trimCurrentPrefix(path)
+	withoutCurrentDir := tools.TrimCurrentPrefix(path)
 	for _, t := range args {
-		if withoutCurrentDir == escapeAttrPattern(trimCurrentPrefix(t)) {
+		if withoutCurrentDir == escapeAttrPattern(tools.TrimCurrentPrefix(t)) {
 			return true
 		}
 	}

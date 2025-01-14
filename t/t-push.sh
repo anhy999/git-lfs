@@ -38,6 +38,16 @@ begin_test "push with tracked ref"
 )
 end_test
 
+begin_test "push with invalid ref"
+(
+  set -e
+  push_repo_setup "push-invalid-branch-required"
+
+  git lfs push origin jibberish >push.log 2>&1 && exit 1
+  grep "Invalid ref argument" push.log
+)
+end_test
+
 begin_test "push with bad ref"
 (
   set -e
@@ -50,6 +60,16 @@ begin_test "push with bad ref"
   fi
 
   grep 'batch response: Expected ref "refs/heads/other", got "refs/heads/main"' push.log
+)
+end_test
+
+begin_test "push with nothing"
+(
+  set -e
+  push_repo_setup "push-nothing"
+
+  git lfs push origin 2>&1 | tee push.log
+  grep "At least one ref must be supplied without --all" push.log
 )
 end_test
 
@@ -432,6 +452,9 @@ begin_test "push object id(s)"
   git add .gitattributes a.dat
   git commit -m "add a.dat"
 
+  git lfs push --object-id origin --dry-run 2>&1 | tee push.log
+  grep "At least one object ID must be supplied with --object-id" push.log
+
   git lfs push --object-id origin \
     4c48d2a6991c9895bcddcf027e1e4907280bcf21975492b1afbade396d6a3340 \
     2>&1 | tee push.log
@@ -464,9 +487,8 @@ begin_test "push object id(s) via stdin"
   git add .gitattributes a.dat
   git commit -m "add a.dat"
 
-  echo "" | git lfs push --object-id origin --stdin --dry-run \
-    2>&1 | tee push.log
-  grep "At least one object ID must be supplied with --object-id" push.log
+  git lfs push --object-id origin --stdin --dry-run </dev/null 2>&1 | tee push.log
+  grep "At least one object ID must be supplied with --object-id" push.log && exit 1
 
   echo "4c48d2a6991c9895bcddcf027e1e4907280bcf21975492b1afbade396d6a3340" | \
     git lfs push --object-id origin --stdin --dry-run "c0ffee" \
@@ -848,6 +870,44 @@ begin_test 'push with multiple refs and data the server already has'
   [ "$(grep -c "$contents_oid" push.log)" = 0 ]
 
   # Yet we should have pushed the new object successfully.
+  assert_server_object "$reponame" "$contents2_oid"
+)
+end_test
+
+begin_test 'push with multiple tag refs'
+(
+  set -e
+
+  reponame="push-multi-ref-tags"
+  setup_remote_repo "$reponame"
+  clone_repo "$reponame" "$reponame"
+
+  git lfs track "*.dat"
+  git add .gitattributes
+  git commit -m "initial commit"
+
+  contents="abc123"
+  contents_oid="$(calc_oid "$contents")"
+  printf "%s" "$contents" > a.dat
+  git add a.dat
+  git commit -m "add a.dat"
+
+  git tag v1.0.0
+
+  git push origin main v1.0.0
+
+  assert_server_object "$reponame" "$contents_oid"
+
+  contents2="def456"
+  contents2_oid="$(calc_oid "$contents2")"
+  printf "%s" "$contents2" > b.dat
+  git add b.dat
+  git commit -m "add b.dat"
+
+  git tag v1.0.1
+
+  git lfs push origin v1.0.1
+
   assert_server_object "$reponame" "$contents2_oid"
 )
 end_test

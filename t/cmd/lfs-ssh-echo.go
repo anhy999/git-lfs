@@ -60,6 +60,50 @@ func main() {
 	offset := 1
 
 	checkSufficientArgs(offset)
+	if masterArg, found := strings.CutPrefix(os.Args[offset], "-oControlMaster="); found {
+		var master bool
+		switch masterArg {
+		case "yes":
+			master = true
+		case "no":
+			master = false
+		default:
+			fmt.Fprintf(os.Stderr, "expected \"-oControlMaster=yes\" or \"-oControlMaster=no\", got %q", os.Args[offset])
+			os.Exit(1)
+		}
+		if pathArg, found := strings.CutPrefix(os.Args[offset+1], "-oControlPath="); found {
+			if master {
+				if file, err := os.OpenFile(pathArg, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0666); err != nil {
+					if os.IsExist(err) {
+						fmt.Fprintf(os.Stderr, "expected %q to not exist", pathArg)
+					} else {
+						fmt.Fprintf(os.Stderr, "unable to create %q: %s", pathArg, err)
+					}
+					os.Exit(1)
+				} else {
+					file.Close()
+					defer os.Remove(pathArg)
+				}
+			} else {
+				if file, err := os.OpenFile(pathArg, os.O_RDONLY, 0); err != nil {
+					if os.IsNotExist(err) {
+						fmt.Fprintf(os.Stderr, "expected %q to exist", pathArg)
+					} else {
+						fmt.Fprintf(os.Stderr, "unable to open %q: %s", pathArg, err)
+					}
+					os.Exit(1)
+				} else {
+					file.Close()
+				}
+			}
+		} else {
+			fmt.Fprintf(os.Stderr, "expected \"-oControlPath\"")
+			os.Exit(1)
+		}
+		offset += 2
+	}
+
+	checkSufficientArgs(offset)
 	if os.Args[offset] == "-p" {
 		offset += 2
 	}

@@ -171,12 +171,12 @@ func blobInfo(s *lfs.PointerScanner, blobSha, name string) (sha, from string, er
 }
 
 func scanIndex(ref string) (staged, unstaged []*lfs.DiffIndexEntry, err error) {
-	uncached, err := lfs.NewDiffIndexScanner(ref, false, true)
+	uncached, err := lfs.NewDiffIndexScanner(ref, false, true, "")
 	if err != nil {
 		return nil, nil, err
 	}
 
-	cached, err := lfs.NewDiffIndexScanner(ref, true, false)
+	cached, err := lfs.NewDiffIndexScanner(ref, true, false, "")
 	if err != nil {
 		return nil, nil, err
 	}
@@ -245,7 +245,6 @@ func statusScanRefRange(ref *git.Ref) {
 
 		Print("\t%s (%s)", p.Name, p.Oid)
 	})
-	defer gitscanner.Close()
 
 	Print("%s\n", tr.Tr.Get("Objects to be pushed to %s:", remoteRef.Name))
 	if err := gitscanner.ScanRefRange(ref.Sha, remoteRef.Sha, nil); err != nil {
@@ -336,7 +335,7 @@ func porcelainStatusLine(entry *lfs.DiffIndexEntry) string {
 // relativize relatives a path from "from" to "to". For instance, note that, for
 // any paths "from" and "to", that:
 //
-//   to == filepath.Clean(filepath.Join(from, relativize(from, to)))
+//	to == filepath.Clean(filepath.Join(from, relativize(from, to)))
 func relativize(from, to string) string {
 	if len(from) == 0 {
 		return to

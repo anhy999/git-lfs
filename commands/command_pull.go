@@ -87,13 +87,12 @@ func pull(filter *filepathfilter.Filter) {
 	}()
 
 	processQueue := time.Now()
-	if err := gitscanner.ScanTree(ref.Sha, nil); err != nil {
+	if err := gitscanner.ScanLFSFiles(ref.Sha, nil); err != nil {
 		singleCheckout.Close()
 		ExitWithError(err)
 	}
 
 	meter.Start()
-	gitscanner.Close()
 	q.Wait()
 	wg.Wait()
 	tracerx.PerformanceSince("process queue", processQueue)
@@ -113,7 +112,7 @@ func pull(filter *filepathfilter.Filter) {
 	}
 
 	if singleCheckout.Skip() {
-		fmt.Println(tr.Tr.Get("Skipping object checkout, Git LFS is not installed."))
+		fmt.Println(tr.Tr.Get("Skipping object checkout, Git LFS is not installed for this repository.\nConsider installing it with 'git lfs install'."))
 	}
 }
 

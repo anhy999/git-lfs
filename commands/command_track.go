@@ -5,9 +5,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
+	"path"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -36,6 +37,10 @@ var (
 func trackCommand(cmd *cobra.Command, args []string) {
 	requireGitVersion()
 	setupWorkingCopy()
+
+	if trackDryRunFlag {
+		trackNoModifyAttrsFlag = true
+	}
 
 	if !cfg.Os.Bool("GIT_LFS_TRACK_NO_INSTALL_HOOKS", false) {
 		installHooks(false)
@@ -74,7 +79,7 @@ func trackCommand(cmd *cobra.Command, args []string) {
 	var writeablePatterns []string
 ArgsLoop:
 	for _, unsanitizedPattern := range args {
-		pattern := trimCurrentPrefix(cleanRootPath(unsanitizedPattern))
+		pattern := tools.TrimCurrentPrefix(cleanRootPath(unsanitizedPattern))
 
 		// Generate the new / changed attrib line for merging
 		var encodedArg string
@@ -87,7 +92,7 @@ ArgsLoop:
 
 		if !trackNoModifyAttrsFlag {
 			for _, known := range knownPatterns {
-				if unescapeAttrPattern(known.Path) == filepath.Join(relpath, pattern) &&
+				if unescapeAttrPattern(known.Path) == path.Join(relpath, pattern) &&
 					((trackLockableFlag && known.Lockable) || // enabling lockable & already lockable (no change)
 						(trackNotLockableFlag && !known.Lockable) || // disabling lockable & not lockable (no change)
 						(!trackLockableFlag && !trackNotLockableFlag)) { // leave lockable as-is in all cases
@@ -122,7 +127,7 @@ ArgsLoop:
 		attributesFile *os.File
 	)
 	if !trackNoModifyAttrsFlag {
-		attribContents, err = ioutil.ReadFile(".gitattributes")
+		attribContents, err = os.ReadFile(".gitattributes")
 		// it's fine for file to not exist
 		if err != nil && !os.IsNotExist(err) {
 			Print(tr.Tr.Get("Error reading '.gitattributes' file"))
@@ -161,14 +166,11 @@ ArgsLoop:
 		}
 	}
 
+	modified := false
+	sawError := false
 	// Any items left in the map, write new lines at the end of the file
 	// Note this is only new patterns, not ones which changed locking flags
 	for pattern, newline := range changedAttribLines {
-		if !trackNoModifyAttrsFlag {
-			// Newline already embedded
-			attributesFile.WriteString(newline)
-		}
-
 		// Also, for any new patterns we've added, make sure any existing git
 		// tracked files have their timestamp updated so they will now show as
 		// modified note this is relative to current dir which is how we write
@@ -203,6 +205,12 @@ ArgsLoop:
 			continue
 		}
 
+		if !trackNoModifyAttrsFlag {
+			// Newline already embedded
+			attributesFile.WriteString(newline)
+		}
+		modified = true
+
 		for _, f := range gittracked {
 			if trackVerboseLoggingFlag || trackDryRunFlag {
 				Print(tr.Tr.Get("Touching %q", f))
@@ -213,6 +221,7 @@ ArgsLoop:
 				err := os.Chtimes(f, now, now)
 				if err != nil {
 					LoggedError(err, tr.Tr.Get("Error marking %q modified: %s", f, err))
+					sawError = true
 					continue
 				}
 			}
@@ -224,6 +233,19 @@ ArgsLoop:
 	err = lockClient.FixFileWriteFlagsInDir(relpath, readOnlyPatterns, writeablePatterns)
 	if err != nil {
 		LoggedError(err, tr.Tr.Get("Error changing lockable file permissions: %s", err))
+		sawError = true
+	}
+
+	if sawError {
+		os.Exit(2)
+	}
+	// If we didn't modify things, but that's because the patterns
+	// were already supported, don't return an error, since what the
+	// user wanted has already been done.
+	// Otherwise, if we didn't modify things but only because the
+	// patterns were disallowed, return an error.
+	if !modified && len(changedAttribLines) > 0 {
+		os.Exit(1)
 	}
 }
 
@@ -235,7 +257,10 @@ type PatternData struct {
 }
 
 func listPatterns() {
-	knownPatterns := getAllKnownPatterns()
+	knownPatterns, err := getAllKnownPatterns()
+	if err != nil {
+		Exit("unable to list patterns: %s", err)
+	}
 	if trackJSONFlag {
 		patterns := struct {
 			Patterns []PatternData `json:"patterns"`
@@ -283,19 +308,22 @@ func listPatterns() {
 	}
 }
 
-func getAllKnownPatterns() []git.AttributePath {
+func getAllKnownPatterns() ([]git.AttributePath, error) {
 	mp := gitattr.NewMacroProcessor()
 
 	// Parse these in this order so that macros in one file are properly
 	// expanded when referred to in a later file, then order them in the
 	// order we want.
-	systemPatterns := git.GetSystemAttributePaths(mp, cfg.Os)
+	systemPatterns, err := git.GetSystemAttributePaths(mp, cfg.Os)
+	if err != nil {
+		return nil, err
+	}
 	globalPatterns := git.GetRootAttributePaths(mp, cfg.Git)
 	knownPatterns := git.GetAttributePaths(mp, cfg.LocalWorkingDir(), cfg.LocalGitDir())
 	knownPatterns = append(knownPatterns, globalPatterns...)
 	knownPatterns = append(knownPatterns, systemPatterns...)
 
-	return knownPatterns
+	return knownPatterns, nil
 }
 
 func getAttributeLineEnding(attribs []git.AttributePath) string {
@@ -330,7 +358,12 @@ var (
 )
 
 func escapeGlobCharacters(s string) string {
-	var escaped string = strings.Replace(s, `\`, "/", -1)
+	var escaped string
+	if runtime.GOOS == "windows" {
+		escaped = strings.Replace(s, `\`, "/", -1)
+	} else {
+		escaped = strings.Replace(s, `\`, `\\`, -1)
+	}
 
 	for _, ch := range trackEscapeStrings {
 		escaped = strings.Replace(escaped, ch, fmt.Sprintf("\\%s", ch), -1)
@@ -342,8 +375,13 @@ func escapeGlobCharacters(s string) string {
 	return escaped
 }
 
-func escapeAttrPattern(unescaped string) string {
-	var escaped string = strings.Replace(unescaped, `\`, "/", -1)
+func escapeAttrPattern(s string) string {
+	var escaped string
+	if runtime.GOOS == "windows" {
+		escaped = strings.Replace(s, `\`, "/", -1)
+	} else {
+		escaped = strings.Replace(s, `\`, `\\`, -1)
+	}
 
 	for from, to := range trackEscapePatterns {
 		escaped = strings.Replace(escaped, from, to, -1)
@@ -357,6 +395,10 @@ func unescapeAttrPattern(escaped string) string {
 
 	for to, from := range trackEscapePatterns {
 		unescaped = strings.Replace(unescaped, from, to, -1)
+	}
+
+	if runtime.GOOS != "windows" {
+		unescaped = strings.Replace(unescaped, `\\`, `\`, -1)
 	}
 
 	return unescaped
